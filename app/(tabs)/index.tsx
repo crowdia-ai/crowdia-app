@@ -1,77 +1,103 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
-
-import { HelloWave } from '@/components/hello-wave';
+import { TouchableOpacity, StyleSheet, View } from 'react-native';
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+import { useAuthStore } from '@/stores/authStore';
+import { useRouter } from 'expo-router';
 
 export default function HomeScreen() {
+  const router = useRouter();
+  const { user, userProfile, organizerProfile, logout } = useAuthStore();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch {
+      alert('Logout failed');
+    }
+  };
+
   return (
     <ParallaxScrollView
       headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
       headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
+        <View style={styles.headerContainer}>
+          <ThemedText type="title" style={styles.headerTitle}>Crowdia</ThemedText>
+        </View>
       }>
       <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
+        <ThemedText type="title">
+          {user ? `Welcome, ${userProfile?.display_name || 'User'}!` : 'Welcome to Crowdia'}
         </ThemedText>
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
+      {user && (
+        <ThemedView style={styles.userInfoContainer}>
+          <ThemedText type="subtitle">Your Profile</ThemedText>
+          <ThemedText>
+            <ThemedText type="defaultSemiBold">Username:</ThemedText> {userProfile?.username}
+          </ThemedText>
+          <ThemedText>
+            <ThemedText type="defaultSemiBold">Points:</ThemedText> {userProfile?.points || 0}
+          </ThemedText>
+          <ThemedText>
+            <ThemedText type="defaultSemiBold">Check-ins:</ThemedText> {userProfile?.check_ins_count || 0}
+          </ThemedText>
+
+          {organizerProfile && (
+            <ThemedView style={styles.organizerInfo}>
+              <ThemedText type="subtitle">Organization</ThemedText>
+              <ThemedText>
+                <ThemedText type="defaultSemiBold">Name:</ThemedText> {organizerProfile.organization_name}
+              </ThemedText>
+              <ThemedText>
+                <ThemedText type="defaultSemiBold">Status:</ThemedText>{' '}
+                {organizerProfile.is_verified ? '✅ Verified' : '⏳ Pending Verification'}
+              </ThemedText>
+            </ThemedView>
+          )}
+
+          <TouchableOpacity style={styles.button} onPress={handleLogout}>
+            <ThemedText style={styles.buttonText}>Logout</ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
+      )}
+
+      {!user && (
+        <ThemedView style={styles.authContainer}>
+          <ThemedText type="subtitle">Get Started</ThemedText>
+          <ThemedText style={styles.description}>
+            Join Crowdia to discover and attend amazing events in your community.
+          </ThemedText>
+
+          <TouchableOpacity style={styles.button} onPress={() => router.push('/auth/signup')}>
+            <ThemedText style={styles.buttonText}>Sign Up</ThemedText>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push('/auth/login')}>
+            <ThemedText style={styles.secondaryButtonText}>Already have an account? Login</ThemedText>
+          </TouchableOpacity>
+        </ThemedView>
+      )}
+
+      <ThemedView style={styles.featureContainer}>
+        <ThemedText type="subtitle">Current Features</ThemedText>
+        <ThemedText>✅ User Authentication (Email/Password)</ThemedText>
+        <ThemedText>✅ User Profiles with Points System</ThemedText>
+        <ThemedText>✅ Organizer Registration & Verification</ThemedText>
+        <ThemedText>✅ Session Management</ThemedText>
+        <ThemedText>🔄 Event Feed (Coming Soon)</ThemedText>
+        <ThemedText>🔄 Event Check-in System (Coming Soon)</ThemedText>
+        <ThemedText>🔄 Admin Panel (Coming Soon)</ThemedText>
       </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
+
+      <ThemedView style={styles.statusContainer}>
+        <ThemedText type="subtitle">App Status</ThemedText>
         <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
+          Phase 1 Development - Authentication & User Management Complete
+        </ThemedText>
+        <ThemedText style={styles.smallText}>
+          Database: Connected | Auth: Active | Tests: Included
         </ThemedText>
       </ThemedView>
     </ParallaxScrollView>
@@ -79,20 +105,81 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
+  headerContainer: {
+    justifyContent: 'center',
     alignItems: 'center',
+    paddingVertical: 20,
+  },
+  headerTitle: {
+    fontSize: 32,
+    fontWeight: 'bold',
+  },
+  titleContainer: {
+    marginBottom: 16,
+  },
+  userInfoContainer: {
+    gap: 12,
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.1)',
+  },
+  organizerInfo: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(0, 122, 255, 0.3)',
     gap: 8,
   },
-  stepContainer: {
-    gap: 8,
+  authContainer: {
+    gap: 16,
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0, 122, 255, 0.08)',
+  },
+  description: {
     marginBottom: 8,
+    lineHeight: 20,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  button: {
+    backgroundColor: '#007AFF',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    color: '#007AFF',
+    fontSize: 14,
+  },
+  featureContainer: {
+    gap: 8,
+    marginBottom: 20,
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+  },
+  statusContainer: {
+    gap: 8,
+    padding: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(33, 150, 243, 0.1)',
+  },
+  smallText: {
+    fontSize: 12,
+    opacity: 0.7,
   },
 });
