@@ -104,6 +104,55 @@ export interface Database {
           created_at?: string;
         };
       };
+      locations: {
+        Row: {
+          id: string;
+          name: string;
+          address: string;
+          lat: number;
+          lng: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          address: string;
+          lat: number;
+          lng: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          address?: string;
+          lat?: number;
+          lng?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      organizer_locations: {
+        Row: {
+          id: string;
+          organizer_id: string;
+          location_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organizer_id: string;
+          location_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organizer_id?: string;
+          location_id?: string;
+          created_at?: string;
+        };
+      };
       events: {
         Row: {
           id: string;
@@ -112,10 +161,7 @@ export interface Database {
           description: string;
           cover_image_url: string;
           category_id: string | null;
-          location_name: string;
-          location_lat: number;
-          location_lng: number;
-          location_address: string;
+          location_id: string;
           event_start_time: string;
           event_end_time: string;
           external_ticket_url: string | null;
@@ -130,10 +176,7 @@ export interface Database {
           description: string;
           cover_image_url: string;
           category_id?: string | null;
-          location_name: string;
-          location_lat: number;
-          location_lng: number;
-          location_address: string;
+          location_id: string;
           event_start_time: string;
           event_end_time: string;
           external_ticket_url?: string | null;
@@ -148,10 +191,7 @@ export interface Database {
           description?: string;
           cover_image_url?: string;
           category_id?: string | null;
-          location_name?: string;
-          location_lat?: number;
-          location_lng?: number;
-          location_address?: string;
+          location_id?: string;
           event_start_time?: string;
           event_end_time?: string;
           external_ticket_url?: string | null;
@@ -285,10 +325,11 @@ export interface Database {
           description: string;
           cover_image_url: string;
           category_id: string | null;
+          location_id: string;
           location_name: string;
+          location_address: string;
           location_lat: number;
           location_lng: number;
-          location_address: string;
           event_start_time: string;
           event_end_time: string;
           external_ticket_url: string | null;
@@ -313,6 +354,8 @@ export interface Database {
 export type User = Database['public']['Tables']['users']['Row'];
 export type Organizer = Database['public']['Tables']['organizers']['Row'];
 export type Category = Database['public']['Tables']['categories']['Row'];
+export type Location = Database['public']['Tables']['locations']['Row'];
+export type OrganizerLocation = Database['public']['Tables']['organizer_locations']['Row'];
 export type Event = Database['public']['Tables']['events']['Row'];
 export type EventWithStats = Database['public']['Views']['events_with_stats']['Row'];
 export type EventInterest = Database['public']['Tables']['event_interests']['Row'];
@@ -324,6 +367,8 @@ export type WaitingListEntry = Database['public']['Tables']['waiting_list']['Row
 // Insert types
 export type UserInsert = Database['public']['Tables']['users']['Insert'];
 export type OrganizerInsert = Database['public']['Tables']['organizers']['Insert'];
+export type LocationInsert = Database['public']['Tables']['locations']['Insert'];
+export type OrganizerLocationInsert = Database['public']['Tables']['organizer_locations']['Insert'];
 export type EventInsert = Database['public']['Tables']['events']['Insert'];
 export type EventInterestInsert = Database['public']['Tables']['event_interests']['Insert'];
 export type EventCheckInInsert = Database['public']['Tables']['event_check_ins']['Insert'];
@@ -331,14 +376,20 @@ export type EventCheckInInsert = Database['public']['Tables']['event_check_ins']
 // Update types
 export type UserUpdate = Database['public']['Tables']['users']['Update'];
 export type OrganizerUpdate = Database['public']['Tables']['organizers']['Update'];
+export type LocationUpdate = Database['public']['Tables']['locations']['Update'];
 export type EventUpdate = Database['public']['Tables']['events']['Update'];
 
 // Composite types for API responses
 export type EventWithOrganizerAndCategory = EventWithStats & {
   organizer: Organizer;
   category: Category | null;
+  location?: Location;
   user_is_interested?: boolean;
   user_has_checked_in?: boolean;
+};
+
+export type OrganizerWithLocations = Organizer & {
+  locations: Location[];
 };
 
 export type UserProfile = User & {
