@@ -1,8 +1,10 @@
 import { config } from "./config";
 import {
   getEventSources,
-  findEventByTitleAndDate,
+  findDuplicateEvent,
   createEvent,
+  updateEvent,
+  getEventById,
   findOrCreateLocation,
   findOrCreateOrganizer,
   findOrCreateCategory,
@@ -23,7 +25,9 @@ interface ExtractionStats {
   sourcesProcessed: number;
   eventsFound: number;
   eventsCreated: number;
-  eventsDuplicate: number;
+  eventsUpdated: number;
+  eventsDuplicateExact: number;
+  eventsDuplicateFuzzy: number;
   eventsSkippedPast: number;
   eventsFailed: number;
   locationsCreated: number;
@@ -35,6 +39,45 @@ interface ProcessedEvent {
   source: EventSource;
 }
 
+/**
+ * Calculate confidence score for an extracted event (0-100)
+ */
+function calculateConfidence(event: ExtractedEvent): number {
+  let score = 0;
+
+  // Has image URL? (+20)
+  if (event.image_url && event.image_url.length > 10) {
+    score += 20;
+  }
+
+  // Has description > 50 chars? (+20)
+  if (event.description && event.description.length > 50) {
+    score += 20;
+  }
+
+  // Has ticket URL? (+15)
+  if (event.ticket_url && event.ticket_url.length > 10) {
+    score += 15;
+  }
+
+  // Has end_time different from start_time? (+10)
+  if (event.end_time && event.end_time !== event.start_time) {
+    score += 10;
+  }
+
+  // Has organizer name? (+15)
+  if (event.organizer_name && event.organizer_name.length > 2) {
+    score += 15;
+  }
+
+  // Has location address? (+20)
+  if (event.location_address && event.location_address.length > 10) {
+    score += 20;
+  }
+
+  return score;
+}
+
 export async function runExtractionAgent(): Promise<ExtractionStats> {
   const startTime = Date.now();
   const errors: string[] = [];
@@ -43,7 +86,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
     sourcesProcessed: 0,
     eventsFound: 0,
     eventsCreated: 0,
-    eventsDuplicate: 0,
+    eventsUpdated: 0,
+    eventsDuplicateExact: 0,
+    eventsDuplicateFuzzy: 0,
     eventsSkippedPast: 0,
     eventsFailed: 0,
     locationsCreated: 0,
@@ -117,12 +162,38 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
           continue;
         }
 
-        // Check for duplicate
-        const existingId = await findEventByTitleAndDate(extracted.title, extracted.start_time);
-        if (existingId) {
-          console.log(`Duplicate: ${extracted.title}`);
-          stats.eventsDuplicate++;
-          continue;
+        // Check for duplicate (exact and fuzzy)
+        const duplicateCheck = await findDuplicateEvent(extracted.title, extracted.start_time);
+
+        if (duplicateCheck.isDuplicate && duplicateCheck.existingId) {
+          if (duplicateCheck.matchType === "exact") {
+            // Exact match - check if we should update
+            const existing = await getEventById(duplicateCheck.existingId);
+            const newConfidence = calculateConfidence(extracted);
+
+            // Update if new data has higher confidence
+            if (existing && newConfidence > (existing.confidence_score || 0)) {
+              const updated = await updateEvent(duplicateCheck.existingId, {
+                description: extracted.description || existing.description,
+                cover_image_url: extracted.image_url || existing.cover_image_url,
+                external_ticket_url: extracted.ticket_url || existing.external_ticket_url,
+                confidence_score: newConfidence,
+              });
+              if (updated) {
+                console.log(`Updated: ${extracted.title} (confidence ${existing.confidence_score} → ${newConfidence})`);
+                stats.eventsUpdated++;
+              }
+            } else {
+              console.log(`Duplicate: ${extracted.title}`);
+              stats.eventsDuplicateExact++;
+            }
+            continue;
+          } else {
+            // Fuzzy match
+            console.log(`Fuzzy duplicate: ${extracted.title}`);
+            stats.eventsDuplicateFuzzy++;
+            continue;
+          }
         }
 
         // Find or create location
@@ -159,6 +230,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         // Find or create category
         const categoryId = extracted.category ? await findOrCreateCategory(extracted.category) : null;
 
+        // Calculate confidence score
+        const confidenceScore = calculateConfidence(extracted);
+
         // Create the event
         const eventData: EventInsert = {
           organizer_id: organizer.id,
@@ -173,6 +247,7 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
           event_url: extracted.detail_url,
           source: source.type,
           is_published: true,
+          confidence_score: confidenceScore,
         };
 
         const eventId = await createEvent(eventData);
@@ -193,6 +268,7 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
 
     // Send report
     const duration = Date.now() - startTime;
+    const totalDuplicates = stats.eventsDuplicateExact + stats.eventsDuplicateFuzzy;
     const report: AgentReport = {
       agentName: "Extraction Agent",
       status: errors.length === 0 ? "success" : errors.length < 3 ? "partial" : "failed",
@@ -201,7 +277,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         "Sources Processed": stats.sourcesProcessed,
         "Events Found": stats.eventsFound,
         "Events Created": stats.eventsCreated,
-        "Duplicates Skipped": stats.eventsDuplicate,
+        "Events Updated": stats.eventsUpdated,
+        "Duplicates (Exact)": stats.eventsDuplicateExact,
+        "Duplicates (Fuzzy)": stats.eventsDuplicateFuzzy,
         "Past Events Skipped": stats.eventsSkippedPast,
         "Events Failed": stats.eventsFailed,
         "Locations Created": stats.locationsCreated,
@@ -216,7 +294,8 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
     console.log(`Sources processed: ${stats.sourcesProcessed}`);
     console.log(`Events found: ${stats.eventsFound}`);
     console.log(`Events created: ${stats.eventsCreated}`);
-    console.log(`Duplicates: ${stats.eventsDuplicate}`);
+    console.log(`Events updated: ${stats.eventsUpdated}`);
+    console.log(`Duplicates: ${totalDuplicates} (${stats.eventsDuplicateExact} exact, ${stats.eventsDuplicateFuzzy} fuzzy)`);
     console.log(`Past events skipped: ${stats.eventsSkippedPast}`);
     console.log(`Failed: ${stats.eventsFailed}`);
 

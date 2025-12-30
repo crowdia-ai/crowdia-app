@@ -1,40 +1,26 @@
 # Agent Improvements Plan
 
-Based on extraction agent test run (2024-12-30).
+Based on extraction agent test runs (2024-12-30).
 
-## Quick Wins (Implementing Now)
+## Completed
 
-### 1. Location Filtering
-Add strict Palermo location validation to prevent non-local events (like "Squaxin Island Tribe Annual Ceremony" from Eventbrite).
+### 1. Location Filtering ✅
+Added strict Palermo location validation in LLM prompt to prevent non-local events.
 
-**Implementation:** Update LLM prompt to strictly filter by Palermo/Sicily.
-
-### 2. Date Validation
+### 2. Date Validation ✅
 Skip events with start_time in the past.
 
-### 3. Set is_published=true
-Events should be published by default (can add review workflow later).
+### 3. Set is_published=true ✅
+Events are published by default.
 
-### 4. Deprioritize JS-Heavy Sources
-RA.co venue pages and Xceed venue pages require JavaScript rendering. Jina Reader can't handle them.
+### 4. Headless Browser Support ✅
+Added Puppeteer for JS-rendered pages. Fixed 4 sources:
+- RA.co: 0 → 22 events
+- Teatro.it: 0 → 36 events
+- Palermoviva: 0 → 31 events
+- Rockol: 0 → 12 events
 
-**Action:** Set `is_active=false` for these sources in the database until we add headless browser support.
-
----
-
-## Medium Priority (Future)
-
-### 5. Add Headless Browser Support
-Use Puppeteer in GitHub Actions to fetch JS-rendered pages.
-
-**Affected sources:**
-- RA.co (all pages - returns 403 or requires JS)
-- Xceed venue pages (JS skeleton loading)
-- Dice venue pages (JS skeleton loading)
-
-**Note:** Xceed and Dice main city pages might work, just venue-specific pages need JS.
-
-### 6. Confidence Scoring
+### 5. Confidence Scoring ✅
 Calculate confidence based on:
 - Has image URL? (+20)
 - Has description > 50 chars? (+20)
@@ -43,43 +29,71 @@ Calculate confidence based on:
 - Has organizer name? (+15)
 - Has location address? (+20)
 
-Events with confidence < 50 could be flagged for review.
+Events with higher confidence get priority when updating duplicates.
 
-### 7. Better Duplicate Detection
-Current: exact title match + same date
-Improved: fuzzy title matching (Levenshtein distance < 3)
+### 6. Fuzzy Duplicate Detection ✅
+- Exact match: case-insensitive title + same date
+- Fuzzy match: Levenshtein distance ≤ 20% of title length
+- Also catches substring matches (e.g., "Event Name - Location" matches "Event Name")
 
-### 8. Event Update Detection
-When re-scraping, detect if event details changed and update instead of skip.
+### 7. Event Update Detection ✅
+When re-scraping, detect if event already exists:
+- Exact match with higher confidence → update existing event
+- Fuzzy match → skip (don't create duplicate)
 
 ---
 
 ## Low Priority (Later)
 
-### 9. Admin Review UI
+### 8. Admin Review UI
 Simple web interface to:
 - View unpublished events
 - Approve/reject
 - Edit before publishing
 
-### 10. Event Cancellation Detection
+### 9. Event Cancellation Detection
 If an event disappears from source, flag it for review rather than leaving stale.
 
-### 11. Image Downloading
+### 10. Image Downloading
 Download cover images to Supabase Storage instead of hotlinking external URLs.
 
 ---
 
-## Source Status
+## Source Status (Updated 2024-12-30)
 
-| Source | Status | Notes |
-|--------|--------|-------|
-| PalermoToday | ✅ Working | Best source - 39 events |
-| Eventbrite | ✅ Working | 17 events, needs location filtering |
-| Balarm | ✅ Working | 2 events |
-| Xceed (city) | ✅ Working | 1 event |
-| Country DiscoClub (RA) | ⚠️ Partial | 4 events but inconsistent |
-| RA.co venue pages | ❌ Blocked | 403 error |
-| Xceed venue pages | ❌ JS-only | Needs headless browser |
-| Dice venue pages | ❌ JS-only | Needs headless browser |
-| TicketSMS | ❌ No events | Page might be empty or wrong URL |
+| Source | Events | Status |
+|--------|--------|--------|
+| PalermoToday | 39 | ✅ Best source |
+| Teatro.it | 36 | ✅ Fixed with headless |
+| Palermoviva | 31 | ✅ Fixed with headless |
+| Ticketone | 25 | ✅ Major concerts |
+| Canzoni | 14 | ✅ Concert listings |
+| Terradamare | 13 | ✅ Local tours |
+| Rockol | 12 | ✅ Fixed with headless |
+| Eventbrite | 11 | ✅ Mixed events |
+| Comune Palermo | 9 | ✅ City events |
+| Itinerarinellarte | 6 | ✅ Art events |
+| Palermoculture | 3 | ✅ Cultural events |
+| Balarm | 2 | ✅ Local events |
+| Xceed | 1 | ✅ Minimal |
+| RA.co | 0-22 | ⚠️ Inconsistent (sometimes blocked) |
+| Feverup | 0-33 | ⚠️ Sometimes JSON parse error |
+| Dice | 0 | ❌ May need different selector |
+| TicketSMS | 0 | ❌ Page may be empty |
+| Virgilio | 0 | ❌ No events extracted |
+
+**Total: ~200 events from 18 sources (13-15 consistently working)**
+
+---
+
+## Latest Run Stats (2024-12-30)
+
+```
+Sources processed: 18
+Events found: 202
+Events created: 1
+Events updated: 122
+Duplicates: 13 (5 exact, 8 fuzzy)
+Past events skipped: 66
+Failed: 0
+```
