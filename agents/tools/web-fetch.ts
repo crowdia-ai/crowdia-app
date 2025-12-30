@@ -1,6 +1,13 @@
 import { fetchPageHeadless } from "./headless";
+import {
+  isFlareSolverrAvailable,
+  fetchWithFlareSolverr,
+  extractTextFromHtml,
+} from "./flaresolverr";
 
 const rateLimitState: Record<string, number> = {};
+let flareSolverrChecked = false;
+let flareSolverrAvailable = false;
 
 const domainDelays: Record<string, number> = {
   "ra.co": 2000,
@@ -21,6 +28,9 @@ const headlessDomains = new Set([
   "rockol.it",
   "virgilio.it",
 ]);
+
+// Domains with Cloudflare protection that may need FlareSolverr
+const cloudflareDomains = new Set(["ra.co", "dice.fm"]);
 
 // Selectors to wait for on specific domains
 const domainSelectors: Record<string, string> = {
@@ -107,36 +117,64 @@ export async function fetchPageDirect(url: string): Promise<string> {
 }
 
 /**
- * Fetch with smart fallback - uses headless for JS-heavy sites
+ * Check if FlareSolverr is available (cached check)
+ */
+async function checkFlareSolverr(): Promise<boolean> {
+  if (!flareSolverrChecked) {
+    flareSolverrAvailable = await isFlareSolverrAvailable();
+    flareSolverrChecked = true;
+    if (flareSolverrAvailable) {
+      console.log("FlareSolverr is available for Cloudflare bypass");
+    }
+  }
+  return flareSolverrAvailable;
+}
+
+/**
+ * Fetch page using Playwright headless browser (preferred method)
+ * Returns text content extracted from the page
  */
 export async function fetchPageWithFallback(url: string): Promise<string> {
   const domain = getDomain(url);
 
-  // Use headless browser for known JS-heavy sites
-  if (requiresHeadless(url)) {
-    console.log(`Using headless browser for ${domain}`);
-    try {
-      const selector = domainSelectors[domain];
-      const content = await fetchPageHeadless(url, {
-        waitForSelector: selector,
-        waitTime: 4000,
-      });
-
-      if (content && content.length > 100) {
-        return content;
+  // For Cloudflare-protected domains, try FlareSolverr first if available
+  if (cloudflareDomains.has(domain)) {
+    const hasFlareSolverr = await checkFlareSolverr();
+    if (hasFlareSolverr) {
+      try {
+        const html = await fetchWithFlareSolverr(url);
+        if (html && html.length > 500) {
+          return extractTextFromHtml(html);
+        }
+      } catch (error) {
+        console.warn(`FlareSolverr failed for ${url}: ${error}`);
       }
-      throw new Error("Headless fetch returned insufficient content");
-    } catch (headlessError) {
-      console.warn(`Headless failed for ${url}: ${headlessError}`);
-      // Fall through to Jina
     }
   }
 
-  // Try Jina first for non-headless sites
+  // Use Playwright headless browser for all sites (preserves images in content)
+  console.log(`Using headless browser for ${domain}`);
   try {
-    return await fetchPage(url);
-  } catch (jinaError) {
-    console.warn(`Jina failed for ${url}, trying direct fetch`);
-    return fetchPageDirect(url);
+    const selector = domainSelectors[domain];
+    const content = await fetchPageHeadless(url, {
+      waitForSelector: selector,
+      waitTime: 3000,
+    });
+
+    if (content && content.length > 100) {
+      return content;
+    }
+    throw new Error("Headless fetch returned insufficient content");
+  } catch (headlessError) {
+    console.warn(`Headless failed for ${url}: ${headlessError}`);
+    // Fall through to direct fetch
+  }
+
+  // Fallback to direct fetch
+  try {
+    return await fetchPageDirect(url);
+  } catch (directError) {
+    console.warn(`Direct fetch also failed for ${url}`);
+    throw directError;
   }
 }

@@ -33,11 +33,12 @@ function levenshteinDistance(a: string, b: string): number {
 
 /**
  * Normalize title for comparison (lowercase, remove punctuation, trim)
+ * Uses unicode-aware regex to handle international characters
  */
 function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
-    .replace(/[^\w\s]/g, "") // remove punctuation
+    .replace(/[^\p{L}\p{N}\s]/gu, "") // remove punctuation (unicode-aware)
     .replace(/\s+/g, " ") // normalize whitespace
     .trim();
 }

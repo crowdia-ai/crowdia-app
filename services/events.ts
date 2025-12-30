@@ -8,6 +8,8 @@ export interface FetchEventsParams {
   timeFilter?: TimeFilter;
   limit?: number;
   offset?: number;
+  /** Stable timestamp for "now" to prevent pagination drift */
+  since?: string;
 }
 
 export interface FetchEventsResult {
@@ -59,7 +61,11 @@ export async function fetchEvents({
   timeFilter = 'all',
   limit = 20,
   offset = 0,
+  since,
 }: FetchEventsParams): Promise<FetchEventsResult> {
+  // Use stable timestamp to prevent pagination drift
+  const now = since ? new Date(since) : new Date();
+
   let query = supabase
     .from('events_with_stats')
     .select('*', { count: 'exact' })
@@ -73,7 +79,7 @@ export async function fetchEvents({
       .lt('event_start_time', dateRange.end.toISOString());
   } else {
     // For 'all', only show upcoming events (from now onwards)
-    query = query.gte('event_start_time', new Date().toISOString());
+    query = query.gte('event_start_time', now.toISOString());
   }
 
   // Apply search filter (contrived local search for now)
@@ -84,22 +90,29 @@ export async function fetchEvents({
     );
   }
 
-  // Apply sorting
+  // Apply sorting (always include id as secondary sort for consistent pagination)
   switch (sortBy) {
     case 'date_asc':
-      query = query.order('event_start_time', { ascending: true });
+      query = query
+        .order('event_start_time', { ascending: true })
+        .order('id', { ascending: true });
       break;
     case 'date_desc':
-      query = query.order('event_start_time', { ascending: false });
+      query = query
+        .order('event_start_time', { ascending: false })
+        .order('id', { ascending: true });
       break;
     case 'popular':
       query = query
         .order('interested_count', { ascending: false })
-        .order('event_start_time', { ascending: true });
+        .order('event_start_time', { ascending: true })
+        .order('id', { ascending: true });
       break;
     case 'nearby':
       // For now, just sort by date. Location-based sorting can be added later
-      query = query.order('event_start_time', { ascending: true });
+      query = query
+        .order('event_start_time', { ascending: true })
+        .order('id', { ascending: true });
       break;
   }
 

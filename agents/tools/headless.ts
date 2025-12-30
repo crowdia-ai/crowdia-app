@@ -68,17 +68,88 @@ export async function fetchPageHeadless(
       });
     }
 
-    // Additional wait for JS to render
+    // Scroll to trigger lazy loading of images
+    await page.evaluate(async () => {
+      for (let i = 0; i < 5; i++) {
+        window.scrollTo(0, (i + 1) * 1500);
+        await new Promise(r => setTimeout(r, 300));
+      }
+      window.scrollTo(0, 0); // Scroll back to top
+    });
+
+    // Wait for JS to render
     await new Promise((resolve) => setTimeout(resolve, waitTime));
 
-    // Extract text content
+    // Extract structured content with event details and images
     const content = await page.evaluate(() => {
-      // Remove script and style elements
-      const scripts = document.querySelectorAll("script, style, noscript");
-      scripts.forEach((el) => el.remove());
+      const results: string[] = [];
 
-      // Get text content
-      return document.body?.innerText || "";
+      // Get og:image meta tag for the page
+      const ogImage = document.querySelector('meta[property="og:image"]')?.getAttribute('content') || '';
+      if (ogImage) {
+        results.push(`[page og:image: ${ogImage}]`);
+      }
+
+      // Find event cards - prioritize well-structured cards with images
+      const eventSelectors = [
+        'article[class*="card"]', // PalermoToday, news sites
+        '[class*="event-card"]', '[class*="eventcard"]',
+        '.event-item', '.listing-item',
+        '[class*="event"][class*="item"]',
+      ];
+
+      const seen = new Set<string>();
+
+      for (const selector of eventSelectors) {
+        const elements = document.querySelectorAll(selector);
+        elements.forEach(el => {
+          // Get the link
+          const link = el.tagName === 'A' ? el as HTMLAnchorElement : el.querySelector('a');
+          const href = link?.getAttribute('href') || '';
+
+          if (!href || seen.has(href)) return;
+          seen.add(href);
+
+          // Get title
+          const titleEl = el.querySelector('h1, h2, h3, h4, .title, [class*="title"]') || link;
+          const title = titleEl?.textContent?.trim() || '';
+
+          if (!title || title.length < 5) return;
+
+          // Get image (handle protocol-relative URLs)
+          const img = el.querySelector('img');
+          let imgSrc = img?.getAttribute('src') || img?.getAttribute('data-src') || '';
+          if (imgSrc.startsWith('//')) {
+            imgSrc = 'https:' + imgSrc;
+          }
+
+          // Get date/time info
+          const dateEl = el.querySelector('time, .date, [class*="date"], [class*="time"]');
+          const dateText = dateEl?.textContent?.trim() || '';
+
+          // Get description
+          const descEl = el.querySelector('p, .description, [class*="desc"]');
+          const desc = descEl?.textContent?.trim().substring(0, 200) || '';
+
+          // Build event entry
+          let entry = `EVENT: ${title}`;
+          if (href) entry += `\n  URL: ${href.startsWith('http') ? href : (window.location.origin + (href.startsWith('/') ? '' : '/') + href)}`;
+          if (imgSrc && imgSrc.startsWith('http')) entry += `\n  IMAGE: ${imgSrc}`;
+          if (dateText) entry += `\n  DATE: ${dateText}`;
+          if (desc) entry += `\n  DESC: ${desc}`;
+
+          results.push(entry);
+        });
+      }
+
+      // If no structured events found, fall back to text content
+      if (results.length < 3) {
+        const scripts = document.querySelectorAll("script, style, noscript");
+        scripts.forEach((el) => el.remove());
+        return document.body?.innerText || "";
+      }
+
+      return results.join('\n\n');
     });
 
     return content;

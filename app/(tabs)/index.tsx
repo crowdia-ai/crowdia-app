@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -36,6 +36,9 @@ export default function EventsFeedScreen() {
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('all');
   const [debouncedSearch, setDebouncedSearch] = useState('');
 
+  // Stable timestamp for pagination - prevents duplicate fetches
+  const [since, setSince] = useState(() => new Date().toISOString());
+
   const handleSearchChange = useCallback((text: string) => {
     setSearchQuery(text);
     const timeoutId = setTimeout(() => {
@@ -43,6 +46,16 @@ export default function EventsFeedScreen() {
     }, 300);
     return () => clearTimeout(timeoutId);
   }, []);
+
+  // Reset stable timestamp when filters change
+  useEffect(() => {
+    setSince(new Date().toISOString());
+  }, [debouncedSearch, sortBy, timeFilter]);
+
+  const queryKey = useMemo(
+    () => ['events', debouncedSearch, sortBy, timeFilter, since],
+    [debouncedSearch, sortBy, timeFilter, since]
+  );
 
   const {
     data,
@@ -55,7 +68,7 @@ export default function EventsFeedScreen() {
     hasNextPage,
     isFetchingNextPage,
   } = useInfiniteQuery({
-    queryKey: ['events', debouncedSearch, sortBy, timeFilter],
+    queryKey,
     queryFn: ({ pageParam = 0 }) =>
       fetchEvents({
         search: debouncedSearch,
@@ -63,6 +76,7 @@ export default function EventsFeedScreen() {
         timeFilter,
         limit: ITEMS_PER_PAGE,
         offset: pageParam,
+        since,
       }),
     initialPageParam: 0,
     getNextPageParam: (lastPage, allPages) => {

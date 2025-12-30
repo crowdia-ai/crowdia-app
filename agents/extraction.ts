@@ -26,9 +26,11 @@ interface ExtractionStats {
   eventsFound: number;
   eventsCreated: number;
   eventsUpdated: number;
+  eventsDuplicateInRun: number;
   eventsDuplicateExact: number;
   eventsDuplicateFuzzy: number;
   eventsSkippedPast: number;
+  eventsSkippedListingUrl: number;
   eventsFailed: number;
   locationsCreated: number;
   organizersCreated: number;
@@ -37,6 +39,79 @@ interface ExtractionStats {
 interface ProcessedEvent {
   extracted: ExtractedEvent;
   source: EventSource;
+}
+
+/**
+ * Normalize title for comparison (lowercase, remove punctuation, normalize whitespace)
+ */
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "") // remove punctuation (unicode-aware)
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Check if two titles are similar (fuzzy match)
+ * Returns true if titles match exactly after normalization, or if one contains the other
+ */
+function titlesAreSimilar(title1: string, title2: string): boolean {
+  const norm1 = normalizeTitle(title1);
+  const norm2 = normalizeTitle(title2);
+
+  // Exact match after normalization
+  if (norm1 === norm2) return true;
+
+  // One title contains the other (handles truncated vs full titles)
+  if (norm1.includes(norm2) || norm2.includes(norm1)) return true;
+
+  // Check if they share a significant prefix (first 30 chars after normalization)
+  const minLen = Math.min(norm1.length, norm2.length);
+  if (minLen >= 30) {
+    const prefix1 = norm1.substring(0, 30);
+    const prefix2 = norm2.substring(0, 30);
+    if (prefix1 === prefix2) return true;
+  }
+
+  return false;
+}
+
+interface SeenEvent {
+  title: string;
+  normalizedTitle: string;
+  date: string;
+}
+
+/**
+ * Check if an event is a duplicate of any previously seen event
+ */
+function isDuplicateOfSeen(title: string, startTime: string, seen: SeenEvent[]): boolean {
+  const date = startTime.split("T")[0];
+  const normalizedTitle = normalizeTitle(title);
+
+  for (const event of seen) {
+    if (event.date !== date) continue;
+
+    // Check if titles are similar
+    if (
+      event.normalizedTitle === normalizedTitle ||
+      event.normalizedTitle.includes(normalizedTitle) ||
+      normalizedTitle.includes(event.normalizedTitle)
+    ) {
+      return true;
+    }
+
+    // Check shared prefix for longer titles
+    const minLen = Math.min(event.normalizedTitle.length, normalizedTitle.length);
+    if (minLen >= 30) {
+      if (event.normalizedTitle.substring(0, 30) === normalizedTitle.substring(0, 30)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 /**
@@ -78,6 +153,31 @@ function calculateConfidence(event: ExtractedEvent): number {
   return score;
 }
 
+/**
+ * Detect if a URL is a listing page rather than a specific event page
+ */
+function isListingPageUrl(url: string): boolean {
+  if (!url) return true;
+
+  // Known listing page patterns
+  const listingPatterns = [
+    /ra\.co\/events\/[a-z]{2}\/[a-z-]+$/i, // ra.co/events/it/sicily (no event ID)
+    /\/events\/?$/i, // ends with /events or /events/
+    /\/eventi\/?$/i, // Italian: ends with /eventi
+    /\/eventi-a-palermo\/?$/i, // palermoviva listing page
+    /\/spettacoli\/[a-z]+\/?$/i, // teatro.it/spettacoli/palermo
+    /xceed\.me\/[a-z]{2}\/[a-z]+\/events\/?$/i, // xceed.me/en/palermo/events
+  ];
+
+  for (const pattern of listingPatterns) {
+    if (pattern.test(url)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function runExtractionAgent(): Promise<ExtractionStats> {
   const startTime = Date.now();
   const errors: string[] = [];
@@ -87,9 +187,11 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
     eventsFound: 0,
     eventsCreated: 0,
     eventsUpdated: 0,
+    eventsDuplicateInRun: 0,
     eventsDuplicateExact: 0,
     eventsDuplicateFuzzy: 0,
     eventsSkippedPast: 0,
+    eventsSkippedListingUrl: 0,
     eventsFailed: 0,
     locationsCreated: 0,
     organizersCreated: 0,
@@ -109,8 +211,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
       return stats;
     }
 
-    // Collect all events from all sources
+    // Collect all events from all sources (with in-run deduplication)
     const allEvents: ProcessedEvent[] = [];
+    const seenInRun: SeenEvent[] = []; // Track events seen in this run for fuzzy matching
 
     for (const source of sources) {
       if (stats.eventsFound >= config.maxEventsPerRun) {
@@ -130,14 +233,36 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         const events = await extractEventsFromContent(content, source.name, source.url);
         console.log(`Extracted ${events.length} events from ${source.name}`);
 
+        // Log extraction details for debugging
+        for (const event of events) {
+          const hasImage = event.image_url && event.image_url.startsWith("http");
+          const hasValidUrl = event.detail_url && !isListingPageUrl(event.detail_url);
+          console.log(`  → ${event.title.substring(0, 50)}...`);
+          console.log(`    URL: ${event.detail_url || "(none)"} ${hasValidUrl ? "✓" : "⚠ listing page"}`);
+          console.log(`    Image: ${hasImage ? event.image_url?.substring(0, 50) + "..." : "(none)"}`);
+        }
+
         stats.sourcesProcessed++;
 
-        // Add to collection
+        // Add to collection (with in-run deduplication using fuzzy matching)
         for (const event of events) {
-          if (allEvents.length < config.maxEventsPerRun) {
-            allEvents.push({ extracted: event, source });
-            stats.eventsFound++;
+          if (allEvents.length >= config.maxEventsPerRun) break;
+
+          // Check for in-run duplicate using fuzzy matching
+          if (isDuplicateOfSeen(event.title, event.start_time, seenInRun)) {
+            console.log(`  Skipping in-run duplicate: ${event.title.substring(0, 40)}...`);
+            stats.eventsDuplicateInRun++;
+            continue;
           }
+
+          // Add to seen events
+          seenInRun.push({
+            title: event.title,
+            normalizedTitle: normalizeTitle(event.title),
+            date: event.start_time.split("T")[0],
+          });
+          allEvents.push({ extracted: event, source });
+          stats.eventsFound++;
         }
 
         // Rate limiting between sources
@@ -159,6 +284,13 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         if (eventDate < new Date()) {
           console.log(`Skipping past event: ${extracted.title} (${extracted.start_time})`);
           stats.eventsSkippedPast++;
+          continue;
+        }
+
+        // Skip events with listing page URLs instead of specific event URLs
+        if (isListingPageUrl(extracted.detail_url)) {
+          console.log(`Skipping event with listing URL: ${extracted.title}`);
+          stats.eventsSkippedListingUrl++;
           continue;
         }
 
@@ -268,7 +400,7 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
 
     // Send report
     const duration = Date.now() - startTime;
-    const totalDuplicates = stats.eventsDuplicateExact + stats.eventsDuplicateFuzzy;
+    const totalDuplicates = stats.eventsDuplicateInRun + stats.eventsDuplicateExact + stats.eventsDuplicateFuzzy;
     const report: AgentReport = {
       agentName: "Extraction Agent",
       status: errors.length === 0 ? "success" : errors.length < 3 ? "partial" : "failed",
@@ -278,9 +410,11 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         "Events Found": stats.eventsFound,
         "Events Created": stats.eventsCreated,
         "Events Updated": stats.eventsUpdated,
+        "Duplicates (In-Run)": stats.eventsDuplicateInRun,
         "Duplicates (Exact)": stats.eventsDuplicateExact,
         "Duplicates (Fuzzy)": stats.eventsDuplicateFuzzy,
         "Past Events Skipped": stats.eventsSkippedPast,
+        "Listing URL Skipped": stats.eventsSkippedListingUrl,
         "Events Failed": stats.eventsFailed,
         "Locations Created": stats.locationsCreated,
         "Organizers Created": stats.organizersCreated,
@@ -295,8 +429,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
     console.log(`Events found: ${stats.eventsFound}`);
     console.log(`Events created: ${stats.eventsCreated}`);
     console.log(`Events updated: ${stats.eventsUpdated}`);
-    console.log(`Duplicates: ${totalDuplicates} (${stats.eventsDuplicateExact} exact, ${stats.eventsDuplicateFuzzy} fuzzy)`);
+    console.log(`Duplicates: ${totalDuplicates} (${stats.eventsDuplicateInRun} in-run, ${stats.eventsDuplicateExact} exact, ${stats.eventsDuplicateFuzzy} fuzzy)`);
     console.log(`Past events skipped: ${stats.eventsSkippedPast}`);
+    console.log(`Listing URL skipped: ${stats.eventsSkippedListingUrl}`);
     console.log(`Failed: ${stats.eventsFailed}`);
 
     return stats;

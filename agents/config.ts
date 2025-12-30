@@ -7,7 +7,7 @@ export const config = {
 
   // OpenRouter (LLM)
   openRouterKey: process.env.OPEN_ROUTER_API_KEY!,
-  model: "xiaomi/mimo-v2-flash:free",
+  model: process.env.OPENROUTER_MODEL || "google/gemini-2.0-flash-exp:free",
 
   // Brave Search
   braveKey: process.env.BRAVE_API_KEY!,

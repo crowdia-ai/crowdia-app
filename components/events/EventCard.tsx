@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { EventWithStats } from '@/types/database';
 import { Colors, Spacing, BorderRadius, Typography, Magenta } from '@/constants/theme';
 import { StaticGlowLogo } from '@/components/ui/GlowingLogo';
+import { getProxiedImageUrl } from '@/utils/imageProxy';
 
 interface EventCardProps {
   event: EventWithStats;
@@ -33,7 +34,8 @@ export function EventCard({ event, onPress }: EventCardProps) {
   };
 
   const dateInfo = formatDate(event.event_start_time);
-  const hasValidImage = event.cover_image_url && event.cover_image_url.startsWith('http');
+  const imageUrl = getProxiedImageUrl(event.cover_image_url);
+  const hasValidImage = !!imageUrl;
 
   return (
     <Pressable
@@ -48,7 +50,7 @@ export function EventCard({ event, onPress }: EventCardProps) {
       <View style={styles.imageContainer}>
         {hasValidImage ? (
           <Image
-            source={{ uri: event.cover_image_url }}
+            source={{ uri: imageUrl }}
             style={styles.image}
             contentFit="cover"
             transition={200}

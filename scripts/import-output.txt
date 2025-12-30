@@ -1,0 +1,105 @@
+=== Parsing CSV files ===
+
+Found 29 locations in CSV
+Found 16 organizations in CSV
+
+=== Geocoding locations ===
+
+Geocoding: Reloj Disco Club - "Via Pasquale Calvi, 3/5, Palermo, Italia"
+  ✓ Found: 38.1310015, 13.3545015
+Geocoding: Country DiscoClub - "Viale dell'Olimpo, 3/5, Palermo, Italia"
+No results for "Viale dell'Olimpo, 3/5, Palermo, Italia"
+  ✗ Not found, skipping
+Geocoding: Mob Disco Theatre - "Via Fondo Crocco, 1, Carini, Italia"
+No results for "Via Fondo Crocco, 1, Carini, Italia"
+  ✗ Not found, skipping
+Geocoding: I Candelai - "Via dei Candelai, 65, Palermo, Italia"
+No results for "Via dei Candelai, 65, Palermo, Italia"
+  ✗ Not found, skipping
+Geocoding: Hype Club - "Viale Strasburgo, Palermo, Italia"
+  ✓ Found: 38.1586409, 13.3247701
+Geocoding: Shazam Club - "Area Centro, Palermo, Italia"
+  ✓ Found: 38.0801389, 13.5054631
+Geocoding: Kalhesa - "Foro Italico Umberto I, 21, Palermo, Italia"
+  ✓ Found: 38.1134714, 13.37755
+Geocoding: La Cavallerizza - "Centro Storico, Palermo, Italia"
+  ✓ Found: 38.0783274, 13.5071021
+Geocoding: PunkFunk - "Centro Storico, Palermo, Italia"
+  ✓ Found: 38.0783274, 13.5071021
+Geocoding: Mind House - "Via San Lorenzo, 273/A, Palermo, Italia"
+  ✓ Found: 38.1632718, 13.3225714
+Geocoding: Pay One - "Via dei Nebrodi, 55/A, Palermo, Italia"
+  ✓ Found: 38.153205, 13.3271933
+Geocoding: Fabric Club House - "Via Ugo La Malfa, 95, Palermo, Italia"
+  ✓ Found: 38.1626264, 13.314027
+Skipping closed venue: Vanilla Club
+Geocoding: Malaluna - "Via Resurrezione, 82, Palermo, Italia"
+No results for "Via Resurrezione, 82, Palermo, Italia"
+  ✗ Not found, skipping
+Skipping closed venue: Bier Garten
+Skipping closed venue: L'Ombelico del Mondo
+Skipping closed venue: Solemar Club
+Skipping closed venue: Sea Club
+Skipping closed venue: Maljk
+Skipping closed venue: Lidò Addaura
+Skipping closed venue: Caporama Discoclub
+Skipping closed venue: BiBi Summer Club
+Skipping closed venue: Marrakech
+Skipping closed venue: Curaçao Beach Club
+Geocoding: Berlin Cafè - "Via I. La Lumia, Palermo, Italia"
+No results for "Via I. La Lumia, Palermo, Italia"
+  ✗ Not found, skipping
+Geocoding: Officina di Dio - "Via G.P. Bertolino, 25/27, Palermo, Italia"
+No results for "Via G.P. Bertolino, 25/27, Palermo, Italia"
+  ✗ Not found, skipping
+Geocoding: Bolazzi - "Piazzetta Bagnasco, Palermo, Italia"
+  ✓ Found: 38.1231652, 13.3554786
+Geocoding: Ostello Bello - "Via Galileo Ferraris, 3, Palermo, Italia"
+  ✓ Found: 38.1234742, 13.3654218
+Geocoding: Miles Jazz Club - "Via Enrico Albanese, 5, Palermo, Italia"
+  ✓ Found: 38.1312476, 13.3572724
+
+Geocoded 12 locations
+
+=== Generating SQL ===
+
+-- Locations
+INSERT INTO locations (name, address, lat, lng, website_url, venue_type, seasonality)
+VALUES
+  ('Reloj Disco Club', 'Via Pasquale Calvi, 3/5, Palermo (Centro)', 38.1310015, 13.3545015, NULL, 'Big_Venue', 'Invernale'),
+  ('Hype Club', 'Viale Strasburgo, Palermo (Stadio)', 38.1586409, 13.3247701, NULL, 'Underground_Club', 'Invernale'),
+  ('Shazam Club', 'Area Centro, Palermo (Centro)', 38.0801389, 13.5054631, NULL, 'Underground_Club', 'Invernale'),
+  ('Kalhesa', 'Foro Italico Umberto I, 21, Palermo (Porto)', 38.1134714, 13.37755, NULL, 'Social_Hub', 'Invernale/Estiva'),
+  ('La Cavallerizza', 'Centro Storico, Palermo (Centro)', 38.0783274, 13.5071021, 'Acchiana', 'Social_Hub', 'Invernale'),
+  ('PunkFunk', 'Centro Storico, Palermo (Centro)', 38.0783274, 13.5071021, NULL, 'Underground_Club', 'Invernale'),
+  ('Mind House', 'Via San Lorenzo, 273/A, Palermo (Nord)', 38.1632718, 13.3225714, NULL, 'Underground_Club', 'Invernale'),
+  ('Pay One', 'Via dei Nebrodi, 55/A, Palermo (Nord)', 38.153205, 13.3271933, NULL, 'Big_Venue', 'Invernale'),
+  ('Fabric Club House', 'Via Ugo La Malfa, 95, Palermo (Nord)', 38.1626264, 13.314027, NULL, 'Big_Venue', 'Invernale'),
+  ('Bolazzi', 'Piazzetta Bagnasco, Palermo (Centro)', 38.1231652, 13.3554786, NULL, 'Social_Hub', 'Invernale'),
+  ('Ostello Bello', 'Via Galileo Ferraris, 3, Palermo (Centro)', 38.1234742, 13.3654218, NULL, 'Social_Hub', 'Invernale'),
+  ('Miles Jazz Club', 'Via Enrico Albanese, 5, Palermo (Centro)', 38.1312476, 13.3572724, NULL, 'Social_Hub', 'Invernale')
+ON CONFLICT DO NOTHING;
+
+-- Organizations
+INSERT INTO organizers (organization_name, instagram_handle, phone, email, website_url)
+VALUES
+  ('PopShock', 'popshock_', '3888574539', 'info@popshock.it', NULL),
+  ('Exit Drinks', 'exitdrinks', '3484005251', 'info@exitdrinks.com', NULL),
+  ('Unlocked', 'unlocked_music_festival', '3911001794', 'info@face.events', NULL),
+  ('Panorama', 'panoramafestival_', '3208941011/3343529557(AlessandroAlbergoni)', 'hello@panoramafestival.it', NULL),
+  ('Sensazione Stupenda', 'sensazione_stupenda', NULL, NULL, NULL),
+  ('Level Up', 'levelup.pmo', '3513369037', NULL, NULL),
+  ('Electrolab', 'electrolab.event', NULL, 'electrolab.event@gmail.com', NULL),
+  ('Locura', 'locura.events', NULL, NULL, NULL),
+  ('Essentials', 'essentials.events', '3920090836', NULL, NULL),
+  ('Quimeera', 'quimeera', NULL, NULL, 'ra.co/promoters/quimeera'),
+  ('Tnos', 'tnos_eventi', NULL, NULL, 'tnos.it'),
+  ('Atmosfera', 'atmosferaevent', NULL, NULL, NULL),
+  ('TheWeekend', 'theweekendpalermo_official', '3282699309', NULL, NULL),
+  ('FTA (FestaTraAmici)', 'ftamici', NULL, NULL, NULL),
+  ('Music Connecting People', 'musiconnectingpeople_', NULL, NULL, NULL),
+  ('Sonora', 'sonora.experience', 'AntonioRestivo', NULL, NULL)
+ON CONFLICT DO NOTHING;
+
+=== SQL generation complete ===
+Generated SQL for 12 locations and 16 organizations

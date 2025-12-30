@@ -41,7 +41,7 @@ const eventSchema = {
           organizer_name: { type: "string" },
           ticket_url: { type: "string" },
           image_url: { type: "string" },
-          detail_url: { type: "string" },
+          detail_url: { type: "string", description: "The specific URL to this event's detail page (NOT a listing page)" },
           category: { type: "string" },
         },
         required: ["title", "start_time", "detail_url"],
@@ -81,7 +81,24 @@ EXTRACTION RULES:
 - If a date doesn't have a year, assume it's the upcoming occurrence
 - Convert dates to ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
 - If no specific time is given, use 21:00 as default for evening events, 10:00 for morning events
-- Only include events with clear dates (skip "coming soon" or TBA events)`,
+- Only include events with clear dates (skip "coming soon" or TBA events)
+
+IMAGE EXTRACTION (IMPORTANT):
+- The content contains pre-extracted event data in this format:
+  EVENT: title
+    URL: event_url
+    IMAGE: image_url
+    DATE: date_info
+- Copy the IMAGE URL directly as image_url for each event
+- If IMAGE is present, ALWAYS include it - this is critical for the UI
+- The image_url must be an absolute URL starting with http:// or https://
+
+EVENT URL EXTRACTION (CRITICAL):
+- detail_url MUST be the specific URL to THIS event's detail page, NOT a listing page
+- Look for links like "/events/12345", "/event/event-name", or similar patterns
+- NEVER use the source listing page URL (like /events or /events/city) as detail_url
+- If you cannot find a specific event detail URL, skip that event entirely
+- The detail_url should be a complete absolute URL (https://...)`,
         },
         {
           role: "user",
