@@ -95,9 +95,9 @@ export default function EventsFeedScreen() {
 
   const handleEventPress = useCallback(
     (event: EventWithStats) => {
-      console.log('Event pressed:', event.id);
+      router.push(`/event/${event.id}`);
     },
-    []
+    [router]
   );
 
   const renderEvent = useCallback(
