@@ -149,7 +149,7 @@ const styles = StyleSheet.create({
   mapContainer: {
     borderRadius: BorderRadius.lg,
     overflow: 'hidden',
-    height: 180,
+    aspectRatio: 1,
   },
   map: {
     flex: 1,
