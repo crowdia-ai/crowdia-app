@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { supabase } from "@/lib/supabase";
 import type { AgentRun, AgentLog, AgentRunWithLogs } from "../types/database";
 
 export interface DashboardStats {
