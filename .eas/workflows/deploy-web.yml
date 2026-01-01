@@ -11,10 +11,58 @@ jobs:
     params:
       prod: true
 
-  notify_slack:
-    name: Notify Slack
+  notify_slack_success:
+    name: Notify Slack (Success)
     needs: [deploy_web]
+    if: ${{ success() }}
     type: slack
     params:
       webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
-      message: "Web deploy completed for Crowdia"
+      payload:
+        blocks:
+          - type: header
+            text:
+              type: plain_text
+              text: "✅ Web Deploy Succeeded"
+          - type: section
+            fields:
+              - type: mrkdwn
+                text: "*Branch:*\n${{ github.ref_name }}"
+              - type: mrkdwn
+                text: "*Triggered by:*\n${{ github.triggering_actor }}"
+          - type: section
+            text:
+              type: mrkdwn
+              text: "*Commit:*\n${{ github.commit_message }}"
+          - type: context
+            elements:
+              - type: mrkdwn
+                text: "<${{ workflow.url }}|View workflow>"
+
+  notify_slack_failure:
+    name: Notify Slack (Failure)
+    after: [deploy_web]
+    if: ${{ failure() }}
+    type: slack
+    params:
+      webhook_url: ${{ env.SLACK_WEBHOOK_URL }}
+      payload:
+        blocks:
+          - type: header
+            text:
+              type: plain_text
+              text: "❌ Web Deploy Failed"
+          - type: section
+            fields:
+              - type: mrkdwn
+                text: "*Branch:*\n${{ github.ref_name }}"
+              - type: mrkdwn
+                text: "*Triggered by:*\n${{ github.triggering_actor }}"
+          - type: section
+            text:
+              type: mrkdwn
+              text: "*Commit:*\n${{ github.commit_message }}"
+          - type: context
+            elements:
+              - type: mrkdwn
+                text: "<${{ workflow.url }}|View workflow for details>"
