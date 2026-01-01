@@ -24,29 +24,35 @@ export async function getEventSources(): Promise<EventSource[]> {
     }
   });
 
-  // Get locations with event_sources
+  // Get locations with event_sources (non-empty objects only)
   const { data: locations } = await getSupabase()
     .from("locations")
     .select("id, name, website_url, event_sources")
-    .not("event_sources", "is", null);
+    .not("event_sources", "is", null)
+    .neq("event_sources", "{}");
 
   locations?.forEach((l) => {
     const eventSources = l.event_sources as Record<string, string> | null;
-    const url = eventSources ? Object.values(eventSources)[0] : l.website_url;
+    const url = eventSources && Object.keys(eventSources).length > 0
+      ? Object.values(eventSources)[0]
+      : null;
     if (url) {
       sources.push({ type: "location", id: l.id, name: l.name, url });
     }
   });
 
-  // Get organizers with event_sources
+  // Get organizers with event_sources (non-empty objects only)
   const { data: organizers } = await getSupabase()
     .from("organizers")
     .select("id, organization_name, website_url, event_sources")
-    .not("event_sources", "is", null);
+    .not("event_sources", "is", null)
+    .neq("event_sources", "{}");
 
   organizers?.forEach((o) => {
     const eventSources = o.event_sources as Record<string, string> | null;
-    const url = eventSources ? Object.values(eventSources)[0] : o.website_url;
+    const url = eventSources && Object.keys(eventSources).length > 0
+      ? Object.values(eventSources)[0]
+      : null;
     if (url) {
       sources.push({ type: "organizer", id: o.id, name: o.organization_name, url });
     }
