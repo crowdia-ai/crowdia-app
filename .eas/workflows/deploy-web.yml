@@ -10,3 +10,11 @@ jobs:
     type: deploy
     params:
       prod: true
+
+  notify_slack:
+    name: Notify Slack
+    needs: [deploy_web]
+    type: slack
+    params:
+      webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+      message: "Web deploy completed for Crowdia"
