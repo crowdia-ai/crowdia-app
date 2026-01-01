@@ -82,11 +82,11 @@ export async function fetchEvents({
     query = query.gte('event_start_time', now.toISOString());
   }
 
-  // Apply search filter (contrived local search for now)
+  // Apply search filter (searches title, location, and category)
   if (search.trim()) {
-    // Using ilike for case-insensitive search on title and location
+    // Using ilike for case-insensitive search on title, location, and category
     query = query.or(
-      `title.ilike.%${search}%,location_name.ilike.%${search}%,location_address.ilike.%${search}%`
+      `title.ilike.%${search}%,location_name.ilike.%${search}%,location_address.ilike.%${search}%,category_name.ilike.%${search}%`
     );
   }
 
