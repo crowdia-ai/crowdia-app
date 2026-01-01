@@ -51,6 +51,50 @@ const eventSchema = {
   required: ["events"],
 };
 
+/**
+ * Sleep helper for delays
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Retry helper with exponential backoff
+ */
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 4,
+  initialDelayMs: number = 2000
+): Promise<T> {
+  let lastError: Error | undefined;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+
+      // Check if this is a rate limit error
+      const isRateLimit =
+        lastError.message.includes('429') ||
+        lastError.message.includes('rate limit') ||
+        lastError.message.includes('Rate limit');
+
+      if (!isRateLimit || attempt === maxRetries) {
+        // Not a rate limit error, or we've exhausted retries
+        throw lastError;
+      }
+
+      // Calculate delay with exponential backoff: 2s, 4s, 8s, 16s
+      const delayMs = initialDelayMs * Math.pow(2, attempt);
+      console.log(`Rate limit hit (attempt ${attempt + 1}/${maxRetries + 1}). Retrying in ${delayMs}ms...`);
+      await sleep(delayMs);
+    }
+  }
+
+  throw lastError!;
+}
+
 export async function extractEventsFromContent(
   content: string,
   sourceName: string,
@@ -64,12 +108,13 @@ export async function extractEventsFromContent(
       : content;
 
   try {
-    const response = await openrouter.chat.completions.create({
-      model: config.model,
-      messages: [
-        {
-          role: "system",
-          content: `You are an event extraction assistant. Extract upcoming events from the provided page content.
+    const response = await retryWithBackoff(async () => {
+      return await openrouter.chat.completions.create({
+        model: config.model,
+        messages: [
+          {
+            role: "system",
+            content: `You are an event extraction assistant. Extract upcoming events from the provided page content.
 
 CRITICAL LOCATION FILTER:
 - ONLY extract events physically located in Palermo, Sicily or the Palermo province (e.g., Monreale, Bagheria, Cefalù, Terrasini, Carini, etc.)
@@ -99,19 +144,20 @@ EVENT URL EXTRACTION (CRITICAL):
 - NEVER use the source listing page URL (like /events or /events/city) as detail_url
 - If you cannot find a specific event detail URL, skip that event entirely
 - The detail_url should be a complete absolute URL (https://...)`,
-        },
-        {
-          role: "user",
-          content: `Extract all events from this page (source: ${sourceName}, URL: ${sourceUrl}):
+          },
+          {
+            role: "user",
+            content: `Extract all events from this page (source: ${sourceName}, URL: ${sourceUrl}):
 
 ${truncatedContent}
 
 IMPORTANT: Respond ONLY with valid JSON matching this schema (no markdown, no explanation, just JSON):
 ${JSON.stringify(eventSchema, null, 2)}`,
-        },
-      ],
-      max_tokens: 8192,
-      temperature: 0.3,
+          },
+        ],
+        max_tokens: 8192,
+        temperature: 0.3,
+      });
     });
 
     const responseContent = response.choices[0]?.message?.content;
@@ -131,7 +177,7 @@ ${JSON.stringify(eventSchema, null, 2)}`,
   } catch (error) {
     // Check for rate limit errors
     if (error instanceof Error && error.message.includes('429')) {
-      const rateLimitError = new Error(`Rate limit exceeded on OpenRouter. Consider adding credits to your account.`);
+      const rateLimitError = new Error(`Rate limit exceeded on OpenRouter after retries. Consider adding credits to your account.`);
       (rateLimitError as any).isRateLimitError = true;
       (rateLimitError as any).originalError = error;
       console.error("LLM extraction failed:", error);
