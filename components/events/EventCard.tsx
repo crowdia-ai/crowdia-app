@@ -87,7 +87,7 @@ export function EventCard({ event, onPress }: EventCardProps) {
         </View>
 
         {/* Title */}
-        <Text style={[styles.title, { color: colors.text }]} numberOfLines={2}>
+        <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
           {event.title}
         </Text>
 
@@ -110,6 +110,8 @@ export function EventCard({ event, onPress }: EventCardProps) {
   );
 }
 
+const IMAGE_SIZE = 100;
+
 const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
@@ -122,8 +124,9 @@ const styles = StyleSheet.create({
     opacity: 0.8,
   },
   imageContainer: {
-    width: 100,
-    height: 100,
+    width: IMAGE_SIZE,
+    minHeight: IMAGE_SIZE,
+    alignSelf: 'stretch',
   },
   image: {
     width: '100%',
