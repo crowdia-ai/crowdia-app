@@ -181,6 +181,28 @@ function isListingPageUrl(url: string): boolean {
   return false;
 }
 
+/**
+ * Sources that legitimately only have listing page URLs
+ * Events from these sources are accepted even with listing URLs
+ */
+const TRUSTED_LISTING_SOURCES = new Set([
+  "teatro.it",
+  "palermoviva.it",
+  "sanlorenzomercato.it",
+  "palermotoday.it",
+  "feverup.com",
+]);
+
+function isTrustedListingSource(url: string): boolean {
+  if (!url) return false;
+  try {
+    const hostname = new URL(url).hostname.replace("www.", "");
+    return TRUSTED_LISTING_SOURCES.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
 export async function runExtractionAgent(): Promise<ExtractionStats> {
   const startTime = Date.now();
   const errors: string[] = [];
@@ -307,10 +329,15 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         }
 
         // Skip events with listing page URLs instead of specific event URLs
+        // But allow trusted sources that only have listing pages
         if (isListingPageUrl(extracted.detail_url)) {
-          console.log(`Skipping event with listing URL: ${extracted.title}`);
-          stats.eventsSkippedListingUrl++;
-          continue;
+          if (!isTrustedListingSource(extracted.detail_url)) {
+            console.log(`Skipping event with listing URL: ${extracted.title}`);
+            stats.eventsSkippedListingUrl++;
+            continue;
+          }
+          // Trusted source - accept but log it
+          console.log(`Accepting listing URL from trusted source: ${extracted.title}`);
         }
 
         // Check for duplicate (exact and fuzzy)

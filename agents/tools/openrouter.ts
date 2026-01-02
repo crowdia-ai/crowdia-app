@@ -1,6 +1,58 @@
 import OpenAI from "openai";
 import { config } from "../config";
 
+/**
+ * Repair and parse potentially malformed JSON from LLM responses
+ */
+function repairAndParseJSON(responseContent: string): any {
+  let jsonStr = responseContent.trim();
+
+  // Remove markdown code blocks if present
+  if (jsonStr.startsWith("```json")) jsonStr = jsonStr.slice(7);
+  else if (jsonStr.startsWith("```")) jsonStr = jsonStr.slice(3);
+  if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
+  jsonStr = jsonStr.trim();
+
+  // Try parsing as-is first
+  try {
+    return JSON.parse(jsonStr);
+  } catch (firstError) {
+    // Try to extract JSON object from text
+    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("No JSON object found in response. First 500 chars:", jsonStr.substring(0, 500));
+      throw new Error("No JSON object found in LLM response");
+    }
+
+    let json = jsonMatch[0];
+
+    // Fix common LLM JSON issues
+    try {
+      // Remove trailing commas before closing brackets
+      json = json.replace(/,(\s*[\]}])/g, '$1');
+
+      return JSON.parse(json);
+    } catch (secondError) {
+      // Try to close unclosed brackets
+      try {
+        const openBraces = (json.match(/\{/g) || []).length;
+        const closeBraces = (json.match(/\}/g) || []).length;
+        const openBrackets = (json.match(/\[/g) || []).length;
+        const closeBrackets = (json.match(/\]/g) || []).length;
+
+        // Close any unclosed brackets
+        json += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
+        json += '}'.repeat(Math.max(0, openBraces - closeBraces));
+
+        return JSON.parse(json);
+      } catch (thirdError) {
+        console.error("JSON repair failed. First 500 chars of response:", jsonStr.substring(0, 500));
+        throw new Error(`JSON parsing failed after repair attempts: ${thirdError}`);
+      }
+    }
+  }
+}
+
 export const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
   apiKey: config.openRouterKey,
@@ -211,16 +263,8 @@ ${JSON.stringify(eventSchema, null, 2)}`,
     const responseContent = response.choices[0]?.message?.content;
     if (!responseContent) return [];
 
-    // Parse JSON from response
-    let jsonStr = responseContent.trim();
-
-    // Remove markdown code blocks if present
-    if (jsonStr.startsWith("```json")) jsonStr = jsonStr.slice(7);
-    else if (jsonStr.startsWith("```")) jsonStr = jsonStr.slice(3);
-    if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
-    jsonStr = jsonStr.trim();
-
-    const parsed = JSON.parse(jsonStr);
+    // Parse JSON from response with repair logic
+    const parsed = repairAndParseJSON(responseContent);
     return parsed.events || [];
   } catch (error) {
     // Check for rate limit errors

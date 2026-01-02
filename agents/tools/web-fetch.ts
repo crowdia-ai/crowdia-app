@@ -30,6 +30,13 @@ const headlessDomains = new Set([
   "virgilio.it",
 ]);
 
+// Domains that work better with Jina reader (headless returns poor content)
+const jinaPreferredDomains = new Set([
+  "palermotoday.it",
+  "eventbrite.it",
+  "eventbrite.com",
+]);
+
 // Domains with Cloudflare protection that may need FlareSolverr
 // Note: ra.co is handled separately via GraphQL API
 const cloudflareDomains = new Set(["dice.fm"]);
@@ -133,7 +140,7 @@ async function checkFlareSolverr(): Promise<boolean> {
 }
 
 /**
- * Fetch page using Playwright headless browser (preferred method)
+ * Fetch page using the best method for the domain
  * Returns text content extracted from the page
  */
 export async function fetchPageWithFallback(url: string): Promise<string> {
@@ -148,6 +155,20 @@ export async function fetchPageWithFallback(url: string): Promise<string> {
       return content;
     }
     throw new Error("RA.co GraphQL returned insufficient content");
+  }
+
+  // For domains that work better with Jina reader, use that first
+  if (jinaPreferredDomains.has(domain)) {
+    console.log(`Using Jina reader for ${domain} (preferred)`);
+    try {
+      const content = await fetchPage(url);
+      if (content && content.length > 500) {
+        return content;
+      }
+    } catch (error) {
+      console.warn(`Jina failed for ${url}: ${error}`);
+      // Fall through to headless
+    }
   }
 
   // For Cloudflare-protected domains, try FlareSolverr first if available
@@ -165,7 +186,7 @@ export async function fetchPageWithFallback(url: string): Promise<string> {
     }
   }
 
-  // Use Playwright headless browser for all sites (preserves images in content)
+  // Use Playwright headless browser for all other sites
   console.log(`Using headless browser for ${domain}`);
   try {
     const selector = domainSelectors[domain];

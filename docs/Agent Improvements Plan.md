@@ -75,7 +75,64 @@ Fixed infinite scroll showing duplicate events:
 
 ## In Progress
 
-### 13. Image Storage (High Priority)
+### 13. Extraction Agent Issues (2026-01-02)
+
+**Latest Run Stats:**
+| Metric | Value |
+|--------|-------|
+| Sources processed | 37 |
+| Total events collected | 282 |
+| Events created | 46 |
+| Events updated | 10 |
+| Past events skipped | 88 |
+| Listing URL skipped | 49 |
+| In-run duplicates | ~188 |
+| Run time | 19m32s (timeout) |
+
+**Critical Issues:**
+
+#### 13.1 PalermoToday Returns 0 Events (CRITICAL)
+- Was returning 39 events, now returns 0
+- Need to investigate: URL change, Cloudflare, headless issues
+
+#### 13.2 LLM JSON Parsing Failures
+- Teatro Golden: "Unterminated string in JSON at position 21046"
+- Orchestra Sinfonica Siciliana: "Unterminated string in JSON at position 24732"
+- **Fix:** Add `repairAndParseJSON()` function to handle malformed LLM responses
+
+#### 13.3 RA.co Venue Duplicates (~188/run)
+- Venue-specific URLs (Mob, PunkFunk, Reloj, Fabric) all return same events as area query
+- RA.co GraphQL only supports area-based queries, not venue filtering
+- **Fix:** Remove RA.co URLs from location event_sources
+
+#### 13.4 Listing URLs Being Skipped (49 events)
+- teatro.it, palermoviva.it events rejected because they use listing page URLs
+- **Fix:** Add trusted source whitelist to accept listing URLs from known sources
+
+**Sources Returning 0 Events - Investigation Needed:**
+| Source | Type | Likely Cause |
+|--------|------|--------------|
+| PalermoToday Eventi | aggregator | Unknown regression |
+| TicketSMS | aggregator | Empty/JS page |
+| Eventbrite | aggregator | Structure change |
+| Rockol | aggregator | Was working before |
+| Virgilio | aggregator | Selector issues |
+| Kalhesa | location | No events? |
+| Miles Jazz Club | location | Instagram (no fix) |
+| PunkFunk | location | RA.co venue (remove) |
+| Country DiscoClub | location | Unknown |
+| Shazam Club | location | Unknown |
+| Hype Club | location | Unknown |
+| Sealife | location | Instagram (no fix) |
+| Mirage | location | Instagram (no fix) |
+
+**Unreachable Domains:**
+- dorianart.it: ERR_NAME_NOT_RESOLVED
+- cinemateatrogolden.it: ERR_CONNECTION_RESET
+
+---
+
+### 14. Image Storage (High Priority)
 **Problem:** PalermoToday images blocked by browser ORB (Origin Read Blocking)
 - 38 events affected (all from palermotoday.it / citynews CDN)
 - Images show placeholder gradient instead of actual image
@@ -199,30 +256,30 @@ Simple web interface to:
 
 ---
 
-## Source Status (Updated 2024-12-30)
+## Source Status (Updated 2026-01-02)
 
 | Source | Events | Status | Notes |
 |--------|--------|--------|-------|
-| PalermoToday | 39 | ✅ Best source | Images blocked by ORB |
-| Teatro.it | 36 | ✅ Fixed with headless | |
-| Palermoviva | 31 | ✅ Fixed with headless | |
-| Ticketone | 25 | ✅ Major concerts | |
-| Canzoni | 14 | ✅ Concert listings | |
-| Terradamare | 13 | ✅ Local tours | Lazy-load images |
-| Rockol | 12 | ✅ Fixed with headless | |
-| Eventbrite | 11 | ✅ Mixed events | |
-| Comune Palermo | 9 | ✅ City events | |
-| Itinerarinellarte | 6 | ✅ Art events | |
-| Palermoculture | 3 | ✅ Cultural events | |
-| Balarm | 2 | ✅ Local events | |
-| Xceed | 1 | ✅ Minimal | |
-| RA.co | 0-22 | ⚠️ Cloudflare | FlareSolverr should help |
-| Feverup | 0-33 | ⚠️ JSON parse error | Needs investigation |
-| Dice | 0 | ❌ Cloudflare | FlareSolverr should help |
-| TicketSMS | 0 | ❌ Empty page | May need different approach |
-| Virgilio | 0 | ❌ No extraction | Selector issues |
+| Feverup | 30 | ✅ Working | Candlelight events |
+| Fever | 20 | ✅ Working | Same org as Feverup |
+| Teatro Massimo | 15+ | ✅ Working | Some duplicates |
+| RA.co | 14 | ✅ Working | Area query works |
+| Terradamare | 12 | ✅ Working | Local tours |
+| Ticketone | 10+ | ✅ Working | Major concerts |
+| Teatro.it | 10+ | ✅ Working | Theater shows |
+| Palermoviva | 10+ | ✅ Working | Local events |
+| I Candelai | 10+ | ✅ Working | Nightlife |
+| San Lorenzo Mercato | 7 | ✅ Working | Food/music |
+| Comune Palermo | 5+ | ✅ Working | City events |
+| Itinerarinellarte | 5+ | ✅ Working | Art events |
+| Balarm | 2+ | ✅ Working | Local events |
+| **PalermoToday** | **0** | **❌ BROKEN** | **Was 39, needs fix** |
+| Eventbrite | 0 | ❌ Broken | Structure change? |
+| Rockol | 0 | ❌ Broken | Was working |
+| TicketSMS | 0 | ❌ Broken | Empty/JS page |
+| Virgilio | 0 | ❌ Broken | Selector issues |
 
-**Total: ~194 unique events from 18 sources (13-15 consistently working)**
+**Total: 282 events collected, 46 created, ~188 in-run duplicates**
 
 ---
 
@@ -240,21 +297,24 @@ Simple web interface to:
 ### Immediate (This Week)
 1. ~~Fix pagination duplicates~~ ✅
 2. ~~In-run deduplication~~ ✅
-3. Image storage solution
+3. **Fix PalermoToday extraction** (was best source, now 0)
+4. **Add JSON repair logic** (2 sources failing)
+5. **Remove RA.co venue URLs** (~188 duplicates/run)
+6. **Add trusted source whitelist** (49 listing URLs skipped)
 
 ### Short Term (Next 2 Weeks)
-4. Event detail page
-5. User favorites
-6. Push notifications setup
+7. Image storage solution
+8. Investigate other broken sources (Eventbrite, Rockol, etc.)
+9. Event detail page
 
 ### Medium Term (Next Month)
-7. Admin review UI
-8. Category filtering
-9. Search improvements
-10. Location-based sorting
+10. User favorites
+11. Admin review UI
+12. Category filtering
+13. Search improvements
 
 ### Long Term (Future)
-11. Social features
-12. Analytics dashboard
-13. Calendar integration
-14. Multi-language support
+14. Push notifications
+15. Social features
+16. Analytics dashboard
+17. Calendar integration
