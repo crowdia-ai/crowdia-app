@@ -14,18 +14,30 @@ interface DiscoveryStats {
   resultsFound: number;
   newSourcesAdded: number;
   duplicatesSkipped: number;
+  blockedSkipped: number;
 }
 
-// Known event aggregator patterns
+// Known event aggregator patterns - prioritized by extraction success rate
 const AGGREGATOR_PATTERNS = [
-  { pattern: /eventbrite\.(com|it)/i, name: "Eventbrite" },
-  { pattern: /dice\.fm/i, name: "Dice" },
-  { pattern: /ra\.co/i, name: "Resident Advisor" },
-  { pattern: /xceed\.me/i, name: "Xceed" },
-  { pattern: /clubbable\.com/i, name: "Clubbable" },
-  { pattern: /songkick\.com/i, name: "Songkick" },
-  { pattern: /bandsintown\.com/i, name: "Bandsintown" },
-  { pattern: /facebook\.com\/events/i, name: "Facebook Events" },
+  // High priority - Italian sources that work well
+  { pattern: /feverup\.com/i, name: "Feverup", priority: 75 },
+  { pattern: /ticketone\.it/i, name: "Ticketone", priority: 80 },
+  { pattern: /ticketsms\.it/i, name: "TicketSMS", priority: 80 },
+  { pattern: /teatro\.it/i, name: "Teatro.it", priority: 70 },
+  { pattern: /palermotoday\.it/i, name: "PalermoToday", priority: 85 },
+  { pattern: /palermoviva\.it/i, name: "Palermoviva", priority: 60 },
+  { pattern: /balarm\.it/i, name: "Balarm", priority: 75 },
+  { pattern: /terradamare\.org/i, name: "Terradamare", priority: 40 },
+  { pattern: /itinerarinellarte\.it/i, name: "Itinerarinellarte", priority: 35 },
+  // International platforms
+  { pattern: /eventbrite\.(com|it)/i, name: "Eventbrite", priority: 70 },
+  { pattern: /ra\.co/i, name: "Resident Advisor", priority: 100 },
+  { pattern: /dice\.fm/i, name: "Dice", priority: 60 },
+  // Lower priority - may have limited Italian coverage
+  { pattern: /xceed\.me/i, name: "Xceed", priority: 50 },
+  { pattern: /songkick\.com/i, name: "Songkick", priority: 40 },
+  { pattern: /bandsintown\.com/i, name: "Bandsintown", priority: 40 },
+  // Note: Facebook Events removed - requires authentication
 ];
 
 // Patterns that likely indicate an event page
@@ -39,7 +51,91 @@ const EVENT_PAGE_PATTERNS = [
   /discoteca/i,
   /calendario/i,
   /programma/i,
+  /spettacoli/i,
+  /teatro/i,
+  /mostre/i,
+  /appuntamenti/i,
+  /cosa-fare/i,
+  /agenda/i,
+  /biglietti/i,
+  /tickets/i,
 ];
+
+// Domains that should never be added (require auth, not event sources, etc.)
+const BLOCKED_DOMAINS = new Set([
+  "facebook.com",
+  "instagram.com",
+  "twitter.com",
+  "x.com",
+  "reddit.com",
+  "youtube.com",
+  "tiktok.com",
+  "linkedin.com",
+  "pinterest.com",
+  "tripadvisor.it",
+  "tripadvisor.com",
+  "yelp.com",
+  "yelp.it",
+  "booking.com",
+  "airbnb.com",
+  "expedia.com",
+  "google.com",
+  "maps.google.com",
+  "wikipedia.org",
+  "amazon.com",
+  "amazon.it",
+]);
+
+// URL patterns that indicate static/guide content, not event listings
+const BLOCKED_URL_PATTERNS = [
+  /\/magazine\//i,           // Magazine articles
+  /\/blog\//i,               // Blog posts
+  /\/article\//i,            // Articles
+  /\/news\//i,               // News articles
+  /\/guide\//i,              // Guides
+  /\/guida\//i,              // Italian guides
+  /\/comments\//i,           // Comment threads (Reddit)
+  /\/search\?/i,             // Search result pages
+  /\/find_desc=/i,           // Yelp search
+  /\/Attractions-/i,         // TripAdvisor attractions
+  /prontopro\.it/i,          // Service marketplace
+  /area-stampa/i,            // Press releases
+  /\/groups\//i,             // Facebook groups
+  /nightlife-pubs-and-fun/i, // Static guide articles
+  /palermos-nightlife\/?$/i, // Nightlife guides (not event listings)
+  /nightlife-in-palermo-events\/?$/i, // Static guides
+  /palermo-welcome-nightlife/i, // Static venue directory
+  /palermo-welcome-news/i,      // News page, not events
+];
+
+function isBlockedSource(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, "");
+
+    // Check blocked domains
+    if (BLOCKED_DOMAINS.has(hostname)) {
+      return true;
+    }
+
+    // Check if domain ends with a blocked domain (subdomains)
+    for (const blocked of BLOCKED_DOMAINS) {
+      if (hostname.endsWith(`.${blocked}`)) {
+        return true;
+      }
+    }
+
+    // Check blocked URL patterns
+    for (const pattern of BLOCKED_URL_PATTERNS) {
+      if (pattern.test(url)) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
 
 export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
   const startTime = Date.now();
@@ -51,6 +147,7 @@ export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
     resultsFound: 0,
     newSourcesAdded: 0,
     duplicatesSkipped: 0,
+    blockedSkipped: 0,
   };
 
   try {
@@ -68,7 +165,7 @@ export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
 
     // Search for event sources
     const searchResults = await searchEventSources(config.targetMetro);
-    stats.searchesPerformed = 5; // We run 5 different queries
+    stats.searchesPerformed = 14; // We run 14 different queries
     stats.resultsFound = searchResults.length;
 
     await logger.info(`Found ${searchResults.length} search results`);
@@ -88,6 +185,12 @@ export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
     for (const result of searchResults) {
       try {
         const normalizedUrl = normalizeUrl(result.url);
+
+        // Skip blocked sources (social media, travel sites, etc.)
+        if (isBlockedSource(result.url)) {
+          stats.blockedSkipped++;
+          continue;
+        }
 
         // Skip if already tracked
         if (existingUrls.has(normalizedUrl)) {
@@ -112,7 +215,8 @@ export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
             base_url: getBaseUrl(result.url),
             events_url: result.url,
             is_active: false, // Require manual review
-            scrape_priority: aggregatorMatch ? 5 : 3,
+            scrape_priority: aggregatorMatch?.priority || 30, // Use pattern priority or default
+            metro_area: config.targetMetro, // Set metro area for filtering
           });
 
           if (error) {
@@ -147,6 +251,7 @@ export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
         "Results Found": stats.resultsFound,
         "New Sources Added": stats.newSourcesAdded,
         "Duplicates Skipped": stats.duplicatesSkipped,
+        "Blocked Skipped": stats.blockedSkipped,
       },
       errors,
     };
@@ -166,6 +271,7 @@ export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
     await logger.info(`Results found: ${stats.resultsFound}`);
     await logger.info(`New sources added: ${stats.newSourcesAdded}`);
     await logger.info(`Duplicates skipped: ${stats.duplicatesSkipped}`);
+    await logger.info(`Blocked skipped: ${stats.blockedSkipped}`);
 
     return stats;
   } catch (error) {

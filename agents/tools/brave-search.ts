@@ -42,11 +42,25 @@ export async function braveSearch(
 
 export async function searchEventSources(metro: string): Promise<SearchResult[]> {
   const queries = [
+    // General event searches
     `${metro} eventi questa settimana`,
+    `${metro} eventi oggi`,
+    `${metro} cosa fare stasera`,
+    // Music & nightlife
     `${metro} concerti`,
     `${metro} discoteche club`,
-    `${metro} eventi culturali`,
     `${metro} nightlife events`,
+    `${metro} serate dj`,
+    // Culture & arts
+    `${metro} eventi culturali`,
+    `${metro} mostre musei`,
+    `${metro} teatro spettacoli`,
+    // Site-specific discovery
+    `site:feverup.com ${metro}`,
+    `site:eventbrite.it ${metro}`,
+    // Venue discovery
+    `${metro} locali eventi programmazione`,
+    `${metro} venue eventi calendario`,
   ];
 
   const allResults: SearchResult[] = [];
