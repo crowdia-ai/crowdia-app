@@ -17,11 +17,15 @@ const LISTING_PAGE_PATTERNS = [
   /\/eventi\/?$/i,
   /\/eventi-a-palermo\/?$/i,
   /\/spettacoli\/[a-z]+\/?$/i,
+  /\/spettacoli\/?$/i,
   /xceed\.me\/[a-z]{2}\/[a-z]+\/events\/?$/i,
+  /teatromassimo\.it\/calendario\/?$/i,
+  /orchestrasinfonicasiciliana\.it\/.*\/calendario\/?$/i,
+  /teatrobiondo\.it\/spettacoli\/?$/i,
 ];
 
 // Sites that require headless browser
-const HEADLESS_DOMAINS = new Set(["ra.co", "dice.fm", "xceed.me", "teatro.it"]);
+const HEADLESS_DOMAINS = new Set(["ra.co", "dice.fm", "xceed.me", "teatro.it", "teatrobiondo.it"]);
 
 function isListingPageUrl(url: string): boolean {
   return LISTING_PAGE_PATTERNS.some((pattern) => pattern.test(url));
@@ -123,6 +127,12 @@ async function findEventUrl(
     query = `site:ra.co "${title}" palermo`;
   } else if (domain === "teatro.it") {
     query = `site:teatro.it "${title}" palermo`;
+  } else if (domain === "teatromassimo.it") {
+    query = `site:teatromassimo.it "${title}"`;
+  } else if (domain === "orchestrasinfonicasiciliana.it") {
+    query = `site:orchestrasinfonicasiciliana.it "${title}"`;
+  } else if (domain === "teatrobiondo.it") {
+    query = `site:teatrobiondo.it "${title}"`;
   } else {
     query = `"${title}" palermo evento`;
   }
@@ -158,6 +168,24 @@ async function findEventUrl(
               return result.url;
             }
           }
+        } else if (
+          domain === "teatromassimo.it" &&
+          result.url.includes("teatromassimo.it/event/")
+        ) {
+          // Teatro Massimo event pages are like /event/turandot-2/
+          return result.url;
+        } else if (
+          domain === "orchestrasinfonicasiciliana.it" &&
+          result.url.includes("/evento/")
+        ) {
+          // Orchestra Sinfonica event pages have /evento/ in the URL
+          return result.url;
+        } else if (
+          domain === "teatrobiondo.it" &&
+          result.url.includes("teatrobiondo.it/") &&
+          !result.url.endsWith("/spettacoli/")
+        ) {
+          return result.url;
         } else if (!isListingPageUrl(result.url)) {
           return result.url;
         }
