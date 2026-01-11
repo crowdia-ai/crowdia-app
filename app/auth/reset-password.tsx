@@ -38,8 +38,9 @@ export default function ResetPasswordScreen() {
 
     // Also check for existing session (in case auth state change already fired)
     const checkExistingSession = async () => {
-      // Give Supabase time to process the URL and exchange the code
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Give Supabase more time to process the URL and exchange the code
+      // Increased from 1s to 3s to handle slower connections
+      await new Promise(resolve => setTimeout(resolve, 3000));
 
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
@@ -54,11 +55,13 @@ export default function ResetPasswordScreen() {
 
           if (errorParam) {
             setError(errorDescription || 'Invalid or expired reset link. Please request a new one.');
-          } else if (!code && !window.location.hash.includes('access_token')) {
-            setError('No recovery token found. Please use the link from your email.');
           } else if (code) {
-            // Code exists but wasn't exchanged - might be invalid
+            // Code exists but wasn't exchanged after waiting - likely invalid
             setError('Invalid or expired reset link. Please request a new one.');
+          } else if (!window.location.hash.includes('access_token') && !window.location.hash.includes('recovery')) {
+            // Only show error if there's no token AND no recovery indicator
+            // This prevents false positives when user navigates directly to the page
+            setError('No recovery token found. Please use the link from your email.');
           }
         } else {
           // For native apps, check params
@@ -68,9 +71,11 @@ export default function ResetPasswordScreen() {
 
           if (errorParam) {
             setError(errorDescription || 'Invalid or expired reset link. Please request a new one.');
-          } else if (!code) {
-            setError('No recovery token found. Please use the link from your email.');
+          } else if (code) {
+            // Code exists but session wasn't created - likely invalid
+            setError('Invalid or expired reset link. Please request a new one.');
           }
+          // For native, don't show error if no code - user might be testing
         }
       }
       setIsCheckingToken(false);
