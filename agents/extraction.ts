@@ -18,6 +18,8 @@ import {
   alertError,
   closeBrowser,
   uploadEventImage,
+  withRetry,
+  SOURCE_RETRY_OPTIONS,
   type ExtractedEvent,
   type AgentReport,
 } from "./tools";
@@ -26,6 +28,7 @@ import { AgentLogger } from "./logger";
 
 interface ExtractionStats {
   sourcesProcessed: number;
+  sourcesFailed: number;
   eventsFound: number;
   eventsCreated: number;
   eventsUpdated: number;
@@ -212,6 +215,7 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
 
   const stats: ExtractionStats = {
     sourcesProcessed: 0,
+    sourcesFailed: 0,
     eventsFound: 0,
     eventsCreated: 0,
     eventsUpdated: 0,
@@ -261,60 +265,69 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
       }
 
       try {
-        await logger.info(`Processing source: ${source.name} (${source.type})`, { source_name: source.name, source_type: source.type, url: source.url });
+        // Process source with retry logic for transient failures
+        await withRetry(async () => {
+          await logger.info(`Processing source: ${source.name} (${source.type})`, { source_name: source.name, source_type: source.type, url: source.url });
 
-        // Fetch page content
-        const content = await fetchPageWithFallback(source.url);
-        await logger.debug(`Fetched ${content.length} chars from ${source.name}`);
+          // Fetch page content
+          const content = await fetchPageWithFallback(source.url);
+          await logger.debug(`Fetched ${content.length} chars from ${source.name}`);
 
-        // Extract events using LLM
-        const events = await extractEventsFromContent(content, source.name, source.url);
-        await logger.info(`Extracted ${events.length} events from ${source.name}`);
+          // Extract events using LLM
+          const events = await extractEventsFromContent(content, source.name, source.url);
+          await logger.info(`Extracted ${events.length} events from ${source.name}`);
 
-        // Log extraction details for debugging
-        for (const event of events) {
-          const hasImage = event.image_url && event.image_url.startsWith("http");
-          const hasValidUrl = event.detail_url && !isListingPageUrl(event.detail_url);
-          console.log(`  → ${event.title.substring(0, 50)}...`);
-          console.log(`    URL: ${event.detail_url || "(none)"} ${hasValidUrl ? "✓" : "⚠ listing page"}`);
-          console.log(`    Image: ${hasImage ? event.image_url?.substring(0, 50) + "..." : "(none)"}`);
-        }
-
-        stats.sourcesProcessed++;
-
-        // Add to collection (with in-run deduplication using fuzzy matching)
-        for (const event of events) {
-          if (allEvents.length >= config.maxEventsPerRun) break;
-
-          // Check for in-run duplicate using fuzzy matching
-          if (isDuplicateOfSeen(event.title, event.start_time, seenInRun)) {
-            console.log(`  Skipping in-run duplicate: ${event.title.substring(0, 40)}...`);
-            stats.eventsDuplicateInRun++;
-            continue;
+          // Log extraction details for debugging
+          for (const event of events) {
+            const hasImage = event.image_url && event.image_url.startsWith("http");
+            const hasValidUrl = event.detail_url && !isListingPageUrl(event.detail_url);
+            console.log(`  → ${event.title.substring(0, 50)}...`);
+            console.log(`    URL: ${event.detail_url || "(none)"} ${hasValidUrl ? "✓" : "⚠ listing page"}`);
+            console.log(`    Image: ${hasImage ? event.image_url?.substring(0, 50) + "..." : "(none)"}`);
           }
 
-          // Add to seen events
-          seenInRun.push({
-            title: event.title,
-            normalizedTitle: normalizeTitle(event.title),
-            date: event.start_time.split("T")[0],
-          });
-          allEvents.push({ extracted: event, source });
-          stats.eventsFound++;
-        }
+          // Add to collection (with in-run deduplication using fuzzy matching)
+          for (const event of events) {
+            if (allEvents.length >= config.maxEventsPerRun) break;
+
+            // Check for in-run duplicate using fuzzy matching
+            if (isDuplicateOfSeen(event.title, event.start_time, seenInRun)) {
+              console.log(`  Skipping in-run duplicate: ${event.title.substring(0, 40)}...`);
+              stats.eventsDuplicateInRun++;
+              continue;
+            }
+
+            // Add to seen events
+            seenInRun.push({
+              title: event.title,
+              normalizedTitle: normalizeTitle(event.title),
+              date: event.start_time.split("T")[0],
+            });
+            allEvents.push({ extracted: event, source });
+            stats.eventsFound++;
+          }
+        }, SOURCE_RETRY_OPTIONS);
+
+        // Success - increment processed count
+        stats.sourcesProcessed++;
 
         // Rate limiting between sources
         await sleep(config.rateLimitMs);
       } catch (error) {
+        // Failed after retries - log and continue to next source
         const errorMsg = `Failed to process ${source.name}: ${error instanceof Error ? error.message : String(error)}`;
         await logger.error(errorMsg);
         errors.push(errorMsg);
+        stats.sourcesFailed++;
 
         // Track rate limit errors specifically
         if ((error as any)?.isRateLimitError || (error instanceof Error && error.message.includes('Rate limit'))) {
           stats.rateLimitErrors++;
           await logger.warn(`Rate limit hit while processing ${source.name}. Consider adding OpenRouter credits.`);
         }
+
+        // Continue processing other sources despite this failure
+        continue;
       }
     }
 
@@ -465,6 +478,7 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
       duration,
       stats: {
         "Sources Processed": stats.sourcesProcessed,
+        "Sources Failed": stats.sourcesFailed,
         "Events Found": stats.eventsFound,
         "Events Created": stats.eventsCreated,
         "Events Updated": stats.eventsUpdated,
@@ -495,6 +509,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
 
     await logger.success("--- Extraction Complete ---");
     await logger.info(`Sources processed: ${stats.sourcesProcessed}`);
+    if (stats.sourcesFailed > 0) {
+      await logger.warn(`Sources failed: ${stats.sourcesFailed} (will retry on next run)`);
+    }
     await logger.info(`Events found: ${stats.eventsFound}`);
     await logger.info(`Events created: ${stats.eventsCreated}`);
     await logger.info(`Events updated: ${stats.eventsUpdated}`);

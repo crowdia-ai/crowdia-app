@@ -7,8 +7,13 @@ let browser: Browser | null = null;
  */
 async function getBrowser(): Promise<Browser> {
   if (!browser || !browser.connected) {
+    // Increase timeouts for CI environments
+    const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
+    const protocolTimeout = isCI ? 180000 : 60000; // 3min in CI, 1min locally
+
     browser = await puppeteer.launch({
-      headless: "new", // Use new headless mode for better stealth
+      headless: true,
+      protocolTimeout,
       args: [
         "--no-sandbox",
         "--disable-setuid-sandbox",
@@ -44,7 +49,10 @@ export async function fetchPageHeadless(
     timeout?: number;
   } = {}
 ): Promise<string> {
-  const { waitForSelector, waitTime = 3000, timeout = 30000 } = options;
+  // Increase timeout in CI environments
+  const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
+  const defaultTimeout = isCI ? 60000 : 30000; // 60s in CI, 30s locally
+  const { waitForSelector, waitTime = 3000, timeout = defaultTimeout } = options;
 
   const browserInstance = await getBrowser();
   const page = await browserInstance.newPage();
@@ -187,7 +195,10 @@ export async function fetchPageHtmlHeadless(
     timeout?: number;
   } = {}
 ): Promise<string> {
-  const { waitForSelector, waitTime = 3000, timeout = 30000 } = options;
+  // Increase timeout in CI environments
+  const isCI = process.env.CI === "true" || process.env.GITHUB_ACTIONS === "true";
+  const defaultTimeout = isCI ? 60000 : 30000; // 60s in CI, 30s locally
+  const { waitForSelector, waitTime = 3000, timeout = defaultTimeout } = options;
 
   const browserInstance = await getBrowser();
   const page = await browserInstance.newPage();
