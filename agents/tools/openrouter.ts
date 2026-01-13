@@ -8,50 +8,61 @@ import { config } from "../config";
  * and converts them to: "title": "Film \"Title\" here"
  */
 function fixUnescapedQuotes(jsonStr: string): string {
-  // Use a state machine to track if we're inside a string value
   let result = '';
-  let inString = false;
-  let inPropertyName = false;
-  let afterColon = false;
+  let i = 0;
 
-  for (let i = 0; i < jsonStr.length; i++) {
-    const char = jsonStr[i];
-    const prevChar = i > 0 ? jsonStr[i - 1] : '';
-    const nextChar = i < jsonStr.length - 1 ? jsonStr[i + 1] : '';
+  while (i < jsonStr.length) {
+    // Look for pattern: ": "
+    if (jsonStr[i] === '"' && jsonStr[i + 1] === ':' && jsonStr.slice(i + 2).match(/^\s*"/)) {
+      // Found start of a string value
+      // Copy the property name and colon
+      while (jsonStr[i] !== ':') {
+        result += jsonStr[i++];
+      }
+      result += jsonStr[i++]; // add the ':'
 
-    if (char === '"' && prevChar !== '\\') {
-      if (!inString) {
-        // Starting a new string
-        inString = true;
-        inPropertyName = !afterColon;
-        afterColon = false;
-        result += char;
-      } else {
-        // Ending a string or unescaped quote inside?
-        // Check if this is the closing quote by looking ahead
-        const isClosingQuote = nextChar === ',' || nextChar === '}' || nextChar === ']' ||
-                               nextChar === ':' || nextChar === ' ' || nextChar === '\n' ||
-                               nextChar === '\r' || nextChar === '\t';
+      // Skip whitespace
+      while (i < jsonStr.length && /\s/.test(jsonStr[i])) {
+        result += jsonStr[i++];
+      }
 
-        if (inPropertyName && nextChar === ':') {
-          // End of property name
-          inString = false;
-          inPropertyName = false;
+      // Now we're at the opening quote of the value
+      result += jsonStr[i++]; // add the opening "
+
+      // Process the string value until we find the closing quote
+      while (i < jsonStr.length) {
+        const char = jsonStr[i];
+        const prevChar = i > 0 ? jsonStr[i - 1] : '';
+
+        if (char === '\\') {
+          // Copy escape sequence as-is
           result += char;
-        } else if (isClosingQuote) {
-          // End of string value
-          inString = false;
-          result += char;
+          i++;
+          if (i < jsonStr.length) {
+            result += jsonStr[i];
+            i++;
+          }
+        } else if (char === '"') {
+          // This could be the closing quote or an unescaped quote
+          // Check if next char suggests this is the end of the value
+          const nextNonSpace = jsonStr.slice(i + 1).match(/^\s*([,\}\]])/);
+          if (nextNonSpace) {
+            // This is the closing quote
+            result += char;
+            i++;
+            break;
+          } else {
+            // This is an unescaped quote in the middle - escape it
+            result += '\\"';
+            i++;
+          }
         } else {
-          // Unescaped quote inside string value - escape it
-          result += '\\' + char;
+          result += char;
+          i++;
         }
       }
-    } else if (char === ':' && !inString) {
-      afterColon = true;
-      result += char;
     } else {
-      result += char;
+      result += jsonStr[i++];
     }
   }
 
