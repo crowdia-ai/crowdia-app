@@ -1,71 +1,6 @@
 import OpenAI from "openai";
+import { z } from "zod";
 import { config } from "../config";
-
-/**
- * Repair and parse potentially malformed JSON from LLM responses
- */
-function repairAndParseJSON(responseContent: string): any {
-  let jsonStr = responseContent.trim();
-
-  // Remove markdown code blocks if present
-  if (jsonStr.startsWith("```json")) jsonStr = jsonStr.slice(7);
-  else if (jsonStr.startsWith("```")) jsonStr = jsonStr.slice(3);
-  if (jsonStr.endsWith("```")) jsonStr = jsonStr.slice(0, -3);
-  jsonStr = jsonStr.trim();
-
-  // Try parsing as-is first
-  try {
-    return JSON.parse(jsonStr);
-  } catch (firstError) {
-    // Try to extract JSON object from text
-    const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("No JSON object found in response. First 500 chars:", jsonStr.substring(0, 500));
-      throw new Error("No JSON object found in LLM response");
-    }
-
-    let json = jsonMatch[0];
-
-    // Fix common LLM JSON issues
-    try {
-      // Remove trailing commas before closing brackets
-      json = json.replace(/,(\s*[\]}])/g, '$1');
-
-      return JSON.parse(json);
-    } catch (secondError) {
-      // Handle truncated strings (incomplete quotes)
-      try {
-        // Find the last valid property by removing incomplete trailing content
-        // Look for patterns like: "key": "incomplete_value (no closing quote)
-        // Remove everything from the last incomplete string value onward
-        const lastCompleteProperty = json.lastIndexOf('",');
-        if (lastCompleteProperty > 0) {
-          // Keep content up to last complete property, then close the JSON
-          json = json.substring(0, lastCompleteProperty + 1);
-        }
-
-        // Remove trailing commas before closing brackets
-        json = json.replace(/,(\s*[\]}])/g, '$1');
-
-        // Try to close unclosed brackets
-        const openBraces = (json.match(/\{/g) || []).length;
-        const closeBraces = (json.match(/\}/g) || []).length;
-        const openBrackets = (json.match(/\[/g) || []).length;
-        const closeBrackets = (json.match(/\]/g) || []).length;
-
-        // Close any unclosed brackets
-        json += ']'.repeat(Math.max(0, openBrackets - closeBrackets));
-        json += '}'.repeat(Math.max(0, openBraces - closeBraces));
-
-        return JSON.parse(json);
-      } catch (thirdError) {
-        console.error("JSON repair failed. First 1000 chars of response:", jsonStr.substring(0, 1000));
-        console.error("Last 500 chars of response:", jsonStr.substring(Math.max(0, jsonStr.length - 500)));
-        throw new Error(`JSON parsing failed after repair attempts: ${thirdError}`);
-      }
-    }
-  }
-}
 
 export const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -89,6 +24,25 @@ export interface ExtractedEvent {
   detail_url: string;
   category?: string;
 }
+
+// Zod schema for validation
+const ExtractedEventSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional().nullable(),
+  start_time: z.string().min(1),
+  end_time: z.string().optional().nullable(),
+  location_name: z.string().optional().nullable(),
+  location_address: z.string().optional().nullable(),
+  organizer_name: z.string().optional().nullable(),
+  ticket_url: z.string().optional().nullable(),
+  image_url: z.string().optional().nullable(),
+  detail_url: z.string().min(1),
+  category: z.string().optional().nullable(),
+});
+
+const ExtractedEventsResponseSchema = z.object({
+  events: z.array(ExtractedEventSchema),
+});
 
 // Standardized categories for event extraction
 const STANDARD_CATEGORIES = [
@@ -183,26 +137,25 @@ async function retryWithBackoff<T>(
   throw lastError!;
 }
 
-export async function extractEventsFromContent(
-  content: string,
+/**
+ * Extract events with validation and retry on parsing failures
+ */
+async function extractWithValidation(
+  truncatedContent: string,
   sourceName: string,
-  sourceUrl: string
+  sourceUrl: string,
+  attempt: number = 1
 ): Promise<ExtractedEvent[]> {
-  // Truncate if too long
-  const maxLength = 100000;
-  const truncatedContent =
-    content.length > maxLength
-      ? content.substring(0, maxLength) + "\n\n[Content truncated...]"
-      : content;
+  const maxAttempts = 3;
 
-  try {
-    const response = await retryWithBackoff(async () => {
-      return await openrouter.chat.completions.create({
-        model: config.model,
-        messages: [
-          {
-            role: "system",
-            content: `You are an event extraction assistant. Extract upcoming events from the provided page content.
+  const response = await retryWithBackoff(async () => {
+    return await openrouter.chat.completions.create({
+      model: config.model,
+      response_format: { type: "json_object" }, // Enable JSON mode
+      messages: [
+        {
+          role: "system",
+          content: `You are an event extraction assistant. Extract upcoming events from the provided page content.
 
 CRITICAL LOCATION FILTER:
 - ONLY extract events physically located in Palermo, Sicily or the Palermo province (e.g., Monreale, Bagheria, Cefalù, Terrasini, Carini, etc.)
@@ -265,38 +218,78 @@ EVENT URL EXTRACTION (CRITICAL):
 
 ${truncatedContent}
 
-IMPORTANT: Respond ONLY with valid JSON matching this schema (no markdown, no explanation, just JSON):
+IMPORTANT: You MUST respond with valid JSON. Use the response_format JSON mode properly:
+- All string values with quotes must escape them (e.g., "He said \\"hello\\"")
+- All properties must have valid values (no undefined)
+- Return JSON matching this schema:
 ${JSON.stringify(eventSchema, null, 2)}`,
-          },
-        ],
-        max_tokens: 16384, // Increased to handle large event listings without truncation
-        temperature: 0.3,
-      });
+        },
+      ],
+      max_tokens: 16384,
+      temperature: 0.3,
     });
+  });
 
-    const responseContent = response.choices[0]?.message?.content;
-    if (!responseContent) return [];
+  const responseContent = response.choices[0]?.message?.content;
+  if (!responseContent) {
+    throw new Error("Empty response from LLM");
+  }
 
-    // Check if response was truncated (finish_reason should be 'stop' for complete responses)
-    const finishReason = response.choices[0]?.finish_reason;
-    if (finishReason === 'length') {
-      console.warn(`⚠️  LLM response was truncated (hit max_tokens limit). Source: ${sourceName}`);
-      console.warn(`This may result in incomplete event extraction. Consider reducing input size or increasing max_tokens.`);
+  // Check if response was truncated
+  const finishReason = response.choices[0]?.finish_reason;
+  if (finishReason === 'length') {
+    console.warn(`⚠️  LLM response truncated (hit max_tokens). Source: ${sourceName}, attempt: ${attempt}/${maxAttempts}`);
+  }
+
+  // Parse and validate with Zod
+  try {
+    const parsed = JSON.parse(responseContent);
+    const validated = ExtractedEventsResponseSchema.parse(parsed);
+    return validated.events as ExtractedEvent[];
+  } catch (error) {
+    // Log validation error
+    if (error instanceof z.ZodError) {
+      console.error(`Zod validation failed (attempt ${attempt}/${maxAttempts}):`, error.errors);
+    } else {
+      console.error(`JSON parsing failed (attempt ${attempt}/${maxAttempts}):`, error);
     }
 
-    // Parse JSON from response with repair logic
-    const parsed = repairAndParseJSON(responseContent);
-    return parsed.events || [];
+    // Retry on validation failure (up to maxAttempts)
+    if (attempt < maxAttempts) {
+      console.warn(`Retrying extraction for ${sourceName} (attempt ${attempt + 1}/${maxAttempts})...`);
+      await sleep(2000); // Wait 2 seconds before retry
+      return extractWithValidation(truncatedContent, sourceName, sourceUrl, attempt + 1);
+    }
+
+    // If all retries exhausted, throw error
+    throw new Error(
+      `Failed to extract valid events after ${maxAttempts} attempts: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}
+
+export async function extractEventsFromContent(
+  content: string,
+  sourceName: string,
+  sourceUrl: string
+): Promise<ExtractedEvent[]> {
+  // Truncate if too long
+  const maxLength = 100000;
+  const truncatedContent =
+    content.length > maxLength
+      ? content.substring(0, maxLength) + "\n\n[Content truncated...]"
+      : content;
+
+  try {
+    return await extractWithValidation(truncatedContent, sourceName, sourceUrl);
   } catch (error) {
     // Check for rate limit errors
     if (error instanceof Error && error.message.includes('429')) {
       const rateLimitError = new Error(`Rate limit exceeded on OpenRouter after retries. Consider adding credits to your account.`);
       (rateLimitError as any).isRateLimitError = true;
       (rateLimitError as any).originalError = error;
-      console.error("LLM extraction failed:", error);
       throw rateLimitError;
     }
-    console.error("LLM extraction failed:", error);
     throw error;
   }
 }
