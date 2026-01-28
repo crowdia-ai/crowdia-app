@@ -18,6 +18,9 @@ export const config = {
   // Slack
   slackWebhook: process.env.SLACK_WEBHOOK_URL,
 
+  // Apify (Instagram scraping)
+  apifyApiToken: process.env.APIFY_API_TOKEN,
+
   // Agent settings
   maxEventsPerRun: 300,
   timeWindowDays: 14,

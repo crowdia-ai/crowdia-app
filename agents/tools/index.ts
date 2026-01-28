@@ -1,4 +1,4 @@
-export { openrouter, extractEventsFromContent, type ExtractedEvent } from "./openrouter";
+export { openrouter, extractEventsFromContent, extractEventsFromInstagramPosts, type ExtractedEvent, type InstagramPostInput } from "./openrouter";
 export { braveSearch, searchEventSources, type SearchResult } from "./brave-search";
 export { fetchPage, fetchPageDirect, fetchPageWithFallback, requiresHeadless } from "./web-fetch";
 export { fetchPageHeadless, closeBrowser } from "./headless";
@@ -8,3 +8,4 @@ export { sendSlackMessage, sendAgentReport, alertError, type AgentReport } from 
 export { fetchRAEvents, isRAUrl } from "./ra-fetcher";
 export { uploadEventImage, isStoredInBucket } from "./image-storage";
 export { withRetry, isRetryableError, SOURCE_RETRY_OPTIONS, type RetryOptions } from "./retry";
+export { scrapeInstagramProfile, isApifyConfigured, type InstagramPost } from "./apify";

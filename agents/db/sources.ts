@@ -1,10 +1,11 @@
 import { getSupabase } from "./client";
 
 export interface EventSource {
-  type: "aggregator" | "location" | "organizer";
+  type: "aggregator" | "location" | "organizer" | "instagram";
   id: string;
   name: string;
   url: string;
+  instagramHandle?: string; // Only for instagram type
 }
 
 export async function getEventSources(): Promise<EventSource[]> {
@@ -55,6 +56,26 @@ export async function getEventSources(): Promise<EventSource[]> {
       : null;
     if (url) {
       sources.push({ type: "organizer", id: o.id, name: o.organization_name, url });
+    }
+  });
+
+  // Get organizers with instagram_handle (for Instagram scraping)
+  const { data: instagramOrganizers } = await getSupabase()
+    .from("organizers")
+    .select("id, organization_name, instagram_handle")
+    .not("instagram_handle", "is", null)
+    .neq("instagram_handle", "");
+
+  instagramOrganizers?.forEach((o) => {
+    if (o.instagram_handle) {
+      const handle = o.instagram_handle.replace(/^@/, "");
+      sources.push({
+        type: "instagram",
+        id: o.id,
+        name: o.organization_name,
+        url: `https://www.instagram.com/${handle}/`,
+        instagramHandle: o.instagram_handle,
+      });
     }
   });
 

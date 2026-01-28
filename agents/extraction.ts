@@ -14,14 +14,18 @@ import {
 import {
   fetchPageWithFallback,
   extractEventsFromContent,
+  extractEventsFromInstagramPosts,
   sendAgentReport,
   alertError,
   closeBrowser,
   uploadEventImage,
   withRetry,
   SOURCE_RETRY_OPTIONS,
+  scrapeInstagramProfile,
+  isApifyConfigured,
   type ExtractedEvent,
   type AgentReport,
+  type InstagramPost,
 } from "./tools";
 import type { EventInsert } from "../types/database";
 import { AgentLogger } from "./logger";
@@ -42,6 +46,10 @@ interface ExtractionStats {
   organizersCreated: number;
   rateLimitErrors: number;
   imagesStored: number;
+  // Instagram-specific stats
+  instagramSourcesProcessed: number;
+  instagramPostsScraped: number;
+  instagramApifyCost: number;
 }
 
 interface ProcessedEvent {
@@ -196,6 +204,7 @@ const TRUSTED_LISTING_SOURCES = new Set([
   "sanlorenzomercato.it",
   "palermotoday.it",
   "feverup.com",
+  "instagram.com", // Instagram posts are their own detail pages
 ]);
 
 function isTrustedListingSource(url: string): boolean {
@@ -229,6 +238,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
     organizersCreated: 0,
     rateLimitErrors: 0,
     imagesStored: 0,
+    instagramSourcesProcessed: 0,
+    instagramPostsScraped: 0,
+    instagramApifyCost: 0,
   };
 
   try {
@@ -265,7 +277,77 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
       }
 
       try {
-        // Process source with retry logic for transient failures
+        // Handle Instagram sources differently
+        if (source.type === "instagram") {
+          // Check if Apify is configured
+          if (!isApifyConfigured()) {
+            await logger.warn(`Skipping Instagram source ${source.name}: APIFY_API_TOKEN not configured`);
+            continue;
+          }
+
+          await logger.info(`Processing Instagram source: ${source.name} (@${source.instagramHandle})`, {
+            source_name: source.name,
+            source_type: source.type,
+            instagram_handle: source.instagramHandle,
+          });
+
+          // Scrape Instagram posts using Apify
+          const posts = await scrapeInstagramProfile(source.instagramHandle!, 10);
+          stats.instagramPostsScraped += posts.length;
+          stats.instagramSourcesProcessed++;
+
+          await logger.info(`Scraped ${posts.length} Instagram posts from @${source.instagramHandle}`);
+
+          // Convert posts to the format expected by the extraction function
+          const postsForExtraction = posts.map((post: InstagramPost) => ({
+            shortCode: post.shortCode,
+            caption: post.caption || "",
+            timestamp: post.timestamp,
+            images: post.images || (post.displayUrl ? [post.displayUrl] : []),
+            url: post.url,
+          }));
+
+          // Extract events from posts using LLM
+          const events = await extractEventsFromInstagramPosts(
+            postsForExtraction,
+            source.name,
+            source.instagramHandle!
+          );
+          await logger.info(`Extracted ${events.length} events from Instagram posts`);
+
+          // Log extraction details
+          for (const event of events) {
+            const hasImage = event.image_url && event.image_url.startsWith("http");
+            console.log(`  → ${event.title.substring(0, 50)}...`);
+            console.log(`    URL: ${event.detail_url || "(none)"}`);
+            console.log(`    Image: ${hasImage ? event.image_url?.substring(0, 50) + "..." : "(none)"}`);
+          }
+
+          // Add to collection (with in-run deduplication)
+          for (const event of events) {
+            if (allEvents.length >= config.maxEventsPerRun) break;
+
+            if (isDuplicateOfSeen(event.title, event.start_time, seenInRun)) {
+              console.log(`  Skipping in-run duplicate: ${event.title.substring(0, 40)}...`);
+              stats.eventsDuplicateInRun++;
+              continue;
+            }
+
+            seenInRun.push({
+              title: event.title,
+              normalizedTitle: normalizeTitle(event.title),
+              date: event.start_time.split("T")[0],
+            });
+            allEvents.push({ extracted: event, source });
+            stats.eventsFound++;
+          }
+
+          // Rate limiting between sources
+          await sleep(config.rateLimitMs);
+          continue;
+        }
+
+        // Process regular web sources with retry logic
         await withRetry(async () => {
           await logger.info(`Processing source: ${source.name} (${source.type})`, { source_name: source.name, source_type: source.type, url: source.url });
 

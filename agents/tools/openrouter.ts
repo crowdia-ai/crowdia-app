@@ -363,3 +363,140 @@ export async function extractEventsFromContent(
     throw error;
   }
 }
+
+/**
+ * Instagram post data for event extraction
+ */
+export interface InstagramPostInput {
+  shortCode: string;
+  caption: string;
+  timestamp: string;
+  images: string[];
+  url: string;
+}
+
+/**
+ * Extract events from Instagram post captions
+ * Each post may contain 0 or 1 event (most promotional posts are single events)
+ */
+export async function extractEventsFromInstagramPosts(
+  posts: InstagramPostInput[],
+  organizerName: string,
+  instagramHandle: string
+): Promise<ExtractedEvent[]> {
+  const allEvents: ExtractedEvent[] = [];
+
+  // Process posts in batches to avoid overwhelming the LLM
+  const batchSize = 5;
+  for (let i = 0; i < posts.length; i += batchSize) {
+    const batch = posts.slice(i, i + batchSize);
+
+    // Format posts for the prompt
+    const postsContent = batch
+      .map((post, idx) => {
+        return `POST ${i + idx + 1}:
+URL: ${post.url}
+POSTED: ${post.timestamp}
+IMAGE: ${post.images[0] || "(none)"}
+CAPTION:
+${post.caption || "(no caption)"}
+---`;
+      })
+      .join("\n\n");
+
+    try {
+      const response = await retryWithBackoff(async () => {
+        return await openrouter.chat.completions.create({
+          model: config.model,
+          response_format: { type: "json_object" },
+          messages: [
+            {
+              role: "system",
+              content: `You are an event extraction assistant specializing in Italian nightlife and event promoters.
+Extract upcoming events from Instagram post captions.
+
+CRITICAL LOCATION FILTER:
+- ONLY extract events physically located in Palermo, Sicily or the Palermo province
+- Most posts from this organizer will be Palermo events, but verify from the caption
+- REJECT any events in other cities
+
+LANGUAGE NOTE:
+- Captions are typically in Italian
+- Common date formats: "Sabato 24 Gennaio", "Ven 31/01", "24.01.2026"
+- Common time formats: "ore 22:00", "h 23", "dalle 22"
+- Common venue indicators: "📍", "@venue_name", "presso", "at"
+
+CATEGORY CLASSIFICATION:
+- Most Instagram promoter posts are "Nightlife" (club nights, DJ sets)
+- Look for clues: DJ names, club names, "techno", "house", "disco", "rave"
+- If it's a live concert → "Concert"
+- If it's a festival → "Festival"
+
+EXTRACTION RULES:
+- Only extract posts that announce UPCOMING events (not recaps of past events)
+- Skip posts that are just photos from past events with no future date
+- If a post mentions a date that has already passed, skip it
+- The detail_url should be the Instagram post URL
+- The image_url should be the first image from the post
+- The organizer_name should be "${organizerName}"
+- Convert dates to ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
+- If no year is specified, assume the next occurrence of that date
+- If no time is specified, use 23:00 as default for nightlife events
+
+IMPORTANT: Return an empty events array for posts that don't announce upcoming events.`,
+            },
+            {
+              role: "user",
+              content: `Extract events from these Instagram posts by @${instagramHandle}:
+
+${postsContent}
+
+Return JSON matching this schema:
+${JSON.stringify(eventSchema, null, 2)}`,
+            },
+          ],
+          max_tokens: 8192,
+          temperature: 0.3,
+        });
+      });
+
+      const responseContent = response.choices[0]?.message?.content;
+      if (!responseContent) continue;
+
+      const fixedContent = fixUnescapedQuotes(responseContent);
+
+      try {
+        const parsed = JSON.parse(fixedContent);
+        const validated = ExtractedEventsResponseSchema.parse(parsed);
+
+        // Add image URLs from original posts if missing
+        for (const event of validated.events) {
+          // Find the matching post by URL
+          const matchingPost = batch.find((p) => p.url === event.detail_url);
+          if (matchingPost && !event.image_url && matchingPost.images.length > 0) {
+            event.image_url = matchingPost.images[0];
+          }
+          // Ensure organizer name is set
+          if (!event.organizer_name) {
+            event.organizer_name = organizerName;
+          }
+        }
+
+        allEvents.push(...(validated.events as ExtractedEvent[]));
+      } catch (parseError) {
+        console.error(`Failed to parse Instagram events batch:`, parseError);
+        // Continue with next batch
+      }
+    } catch (error) {
+      console.error(`Failed to extract events from Instagram batch:`, error);
+      // Continue with next batch
+    }
+
+    // Small delay between batches
+    if (i + batchSize < posts.length) {
+      await sleep(1000);
+    }
+  }
+
+  return allEvents;
+}
