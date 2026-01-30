@@ -471,11 +471,21 @@ ${JSON.stringify(eventSchema, null, 2)}`,
 
         // Add image URLs from original posts if missing
         for (const event of validated.events) {
-          // Find the matching post by URL
-          const matchingPost = batch.find((p) => p.url === event.detail_url);
+          // Find the matching post by URL or shortCode
+          // Extract shortCode from URLs for flexible matching
+          const getShortCode = (url: string) => url?.match(/\/p\/([^\/\?]+)/)?.[1];
+          const eventShortCode = getShortCode(event.detail_url || "");
+          const matchingPost = batch.find((p) => {
+            if (p.url === event.detail_url) return true;
+            const postShortCode = p.shortCode || getShortCode(p.url);
+            return postShortCode && eventShortCode && postShortCode === eventShortCode;
+          });
+          
+          // Add image from matching post if not already set
           if (matchingPost && !event.image_url && matchingPost.images.length > 0) {
             event.image_url = matchingPost.images[0];
           }
+          
           // Ensure organizer name is set
           if (!event.organizer_name) {
             event.organizer_name = organizerName;
