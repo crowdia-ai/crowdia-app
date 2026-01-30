@@ -28,6 +28,7 @@ import {
   alertError,
   closeBrowser,
   uploadEventImage,
+  preUploadInstagramImages,
   withRetry,
   SOURCE_RETRY_OPTIONS,
   scrapeInstagramProfile,
@@ -330,6 +331,21 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
           stats.instagramSourcesProcessed++;
 
           await logger.info(`Scraped ${posts.length} Instagram posts from @${source.instagramHandle}`);
+
+          // Pre-upload images to storage while CDN URLs are still fresh
+          const imageUrlMap = await preUploadInstagramImages(posts);
+          if (imageUrlMap.size > 0) {
+            await logger.debug(`Pre-uploaded ${imageUrlMap.size} images to storage`);
+            // Replace CDN URLs with storage URLs in posts
+            for (const post of posts) {
+              if (post.displayUrl && imageUrlMap.has(post.displayUrl)) {
+                (post as any).displayUrl = imageUrlMap.get(post.displayUrl);
+              }
+              if (post.images) {
+                post.images = post.images.map(url => imageUrlMap.get(url) || url);
+              }
+            }
+          }
 
           // ========== DISCOVERY V2: Extract mentions, hashtags, collabs ==========
           const allMentions: string[] = [];

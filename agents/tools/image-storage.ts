@@ -1,4 +1,5 @@
 import { getSupabase } from "../db";
+import { randomUUID } from "crypto";
 
 interface ImageUploadResult {
   success: boolean;
@@ -19,10 +20,13 @@ async function downloadImage(url: string): Promise<DownloadedImage | null> {
   try {
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; CrowdiaBot/1.0)",
-        Accept: "image/*",
+        // Use Instagram-like headers to avoid blocks
+        "User-Agent": "Instagram 219.0.0.12.117 Android",
+        Accept: "image/*,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        Referer: "https://www.instagram.com/",
       },
-      signal: AbortSignal.timeout(15000), // 15s timeout
+      signal: AbortSignal.timeout(30000), // 30s timeout for Instagram CDN
     });
 
     if (!response.ok) {
@@ -117,4 +121,48 @@ export async function uploadEventImage(
 
   console.log(`Uploaded image for event ${eventId}: ${urlData.publicUrl}`);
   return { success: true, publicUrl: urlData.publicUrl };
+}
+
+/**
+ * Pre-upload Instagram images immediately after scraping (before CDN URLs expire)
+ * Returns a map of original URL -> storage URL for replacement
+ */
+export async function preUploadInstagramImages(
+  posts: Array<{ shortCode: string; displayUrl?: string; images?: string[] }>
+): Promise<Map<string, string>> {
+  const urlMap = new Map<string, string>();
+  const supabase = getSupabase();
+  
+  for (const post of posts) {
+    const imageUrl = post.displayUrl || post.images?.[0];
+    if (!imageUrl || isStoredInBucket(imageUrl)) continue;
+    
+    try {
+      const imageData = await downloadImage(imageUrl);
+      if (!imageData) continue;
+      
+      const ext = getFileExtension(imageUrl, imageData.contentType);
+      // Use post shortCode for unique naming
+      const filePath = `instagram/${post.shortCode}.${ext}`;
+      
+      const { error } = await supabase.storage.from("event-images").upload(filePath, imageData.buffer, {
+        contentType: `image/${ext === "jpg" ? "jpeg" : ext}`,
+        upsert: true,
+        cacheControl: "31536000",
+      });
+      
+      if (error) {
+        console.error(`Pre-upload failed for ${post.shortCode}: ${error.message}`);
+        continue;
+      }
+      
+      const { data: urlData } = supabase.storage.from("event-images").getPublicUrl(filePath);
+      urlMap.set(imageUrl, urlData.publicUrl);
+      console.log(`Pre-uploaded ${post.shortCode} image to storage`);
+    } catch (err) {
+      console.error(`Pre-upload error for ${post.shortCode}:`, err);
+    }
+  }
+  
+  return urlMap;
 }
