@@ -9,6 +9,8 @@ import {
   findOrCreateOrganizer,
   findOrCreateCategory,
   cleanupStuckRuns,
+  createEventMention,
+  updateSourceLastScraped,
   type EventSource,
 } from "./db";
 import {
@@ -342,6 +344,10 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
             stats.eventsFound++;
           }
 
+          // Success - increment processed count and update last_scraped_at
+          stats.sourcesProcessed++;
+          await updateSourceLastScraped(source.id);
+
           // Rate limiting between sources
           await sleep(config.rateLimitMs);
           continue;
@@ -390,8 +396,9 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
           }
         }, SOURCE_RETRY_OPTIONS);
 
-        // Success - increment processed count
+        // Success - increment processed count and update last_scraped_at
         stats.sourcesProcessed++;
+        await updateSourceLastScraped(source.id);
 
         // Rate limiting between sources
         await sleep(config.rateLimitMs);
@@ -531,6 +538,13 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         if (eventId) {
           console.log(`Created: ${extracted.title}`);
           stats.eventsCreated++;
+
+          // Create event mention for provenance tracking
+          await createEventMention(eventId, source.id, {
+            title: extracted.title,
+            detail_url: extracted.detail_url,
+            extracted_at: new Date().toISOString(),
+          }, confidenceScore);
 
           // Upload image to Supabase Storage if available
           if (extracted.image_url) {
