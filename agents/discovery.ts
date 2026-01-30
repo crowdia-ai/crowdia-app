@@ -1,20 +1,64 @@
 import { config } from "./config";
-import { getSupabase, cleanupStuckRuns } from "./db";
+import {
+  getSupabase,
+  cleanupStuckRuns,
+  getPendingPotentialSources,
+  updatePotentialSourceStatus,
+  createEventSourceWithProvenance,
+  getTopHashtags,
+  findOrCreateOrganizer,
+} from "./db";
 import {
   searchEventSources,
   sendAgentReport,
   alertError,
+  scrapeInstagramProfile,
+  isApifyConfigured,
   type SearchResult,
   type AgentReport,
+  type InstagramPost,
 } from "./tools";
+import { openrouter } from "./tools/openrouter";
 import { AgentLogger } from "./logger";
 
 interface DiscoveryStats {
+  // Web search discovery
   searchesPerformed: number;
   resultsFound: number;
   newSourcesAdded: number;
   duplicatesSkipped: number;
   blockedSkipped: number;
+  // Mention/collab discovery
+  potentialSourcesProcessed: number;
+  sourcesValidated: number;
+  sourcesRejected: number;
+  sourcesSkipped: number;
+  // Auto-validation stats
+  accountsChecked: number;
+  accountsPublic: number;
+  accountsActive: number;
+  accountsEventRelated: number;
+  accountsInPalermo: number;
+  // Enrichment stats
+  organizersCreated: number;
+}
+
+interface ValidationResult {
+  isValid: boolean;
+  score: number; // 0-5
+  checks: {
+    accountExists: boolean;
+    isPublic: boolean;
+    isActive: boolean; // Posted in last 30 days
+    isEventRelated: boolean; // LLM check
+    isInPalermo: boolean; // Location check
+  };
+  notes: string;
+  bio?: string;
+  website?: string;
+  followerCount?: number;
+  postCount?: number;
+  recentPosts?: InstagramPost[];
 }
 
 // Known event aggregator patterns - prioritized by extraction success rate
@@ -37,110 +81,412 @@ const AGGREGATOR_PATTERNS = [
   { pattern: /xceed\.me/i, name: "Xceed", priority: 50 },
   { pattern: /songkick\.com/i, name: "Songkick", priority: 40 },
   { pattern: /bandsintown\.com/i, name: "Bandsintown", priority: 40 },
-  // Note: Facebook Events removed - requires authentication
 ];
 
 // Patterns that likely indicate an event page
 const EVENT_PAGE_PATTERNS = [
-  /eventi/i,
-  /events/i,
-  /concerti/i,
-  /concerts/i,
-  /nightlife/i,
-  /clubbing/i,
-  /discoteca/i,
-  /calendario/i,
-  /programma/i,
-  /spettacoli/i,
-  /teatro/i,
-  /mostre/i,
-  /appuntamenti/i,
-  /cosa-fare/i,
-  /agenda/i,
-  /biglietti/i,
-  /tickets/i,
+  /eventi/i, /events/i, /concerti/i, /concerts/i, /nightlife/i,
+  /clubbing/i, /discoteca/i, /calendario/i, /programma/i,
+  /spettacoli/i, /teatro/i, /mostre/i, /appuntamenti/i,
+  /cosa-fare/i, /agenda/i, /biglietti/i, /tickets/i,
 ];
 
-// Domains that should never be added (require auth, not event sources, etc.)
+// Domains that should never be added
 const BLOCKED_DOMAINS = new Set([
-  "facebook.com",
-  "instagram.com",
-  "twitter.com",
-  "x.com",
-  "reddit.com",
-  "youtube.com",
-  "tiktok.com",
-  "linkedin.com",
-  "pinterest.com",
-  "tripadvisor.it",
-  "tripadvisor.com",
-  "yelp.com",
-  "yelp.it",
-  "booking.com",
-  "airbnb.com",
-  "expedia.com",
-  "google.com",
-  "maps.google.com",
-  "wikipedia.org",
-  "amazon.com",
-  "amazon.it",
+  "facebook.com", "instagram.com", "twitter.com", "x.com",
+  "reddit.com", "youtube.com", "tiktok.com", "linkedin.com",
+  "pinterest.com", "tripadvisor.it", "tripadvisor.com",
+  "yelp.com", "yelp.it", "booking.com", "airbnb.com",
+  "expedia.com", "google.com", "maps.google.com",
+  "wikipedia.org", "amazon.com", "amazon.it",
 ]);
 
-// URL patterns that indicate static/guide content, not event listings
+// URL patterns to block
 const BLOCKED_URL_PATTERNS = [
-  /\/magazine\//i,           // Magazine articles
-  /\/blog\//i,               // Blog posts
-  /\/article\//i,            // Articles
-  /\/news\//i,               // News articles
-  /\/guide\//i,              // Guides
-  /\/guida\//i,              // Italian guides
-  /\/comments\//i,           // Comment threads (Reddit)
-  /\/search\?/i,             // Search result pages
-  /\/find_desc=/i,           // Yelp search
-  /\/Attractions-/i,         // TripAdvisor attractions
-  /prontopro\.it/i,          // Service marketplace
-  /area-stampa/i,            // Press releases
-  /\/groups\//i,             // Facebook groups
-  /nightlife-pubs-and-fun/i, // Static guide articles
-  /palermos-nightlife\/?$/i, // Nightlife guides (not event listings)
-  /nightlife-in-palermo-events\/?$/i, // Static guides
-  /palermo-welcome-nightlife/i, // Static venue directory
-  /palermo-welcome-news/i,      // News page, not events
+  /\/magazine\//i, /\/blog\//i, /\/article\//i, /\/news\//i,
+  /\/guide\//i, /\/guida\//i, /\/comments\//i, /\/search\?/i,
+  /\/find_desc=/i, /\/Attractions-/i, /prontopro\.it/i,
+  /area-stampa/i, /\/groups\//i, /nightlife-pubs-and-fun/i,
+  /palermos-nightlife\/?$/i, /nightlife-in-palermo-events\/?$/i,
+  /palermo-welcome-nightlife/i, /palermo-welcome-news/i,
+];
+
+// Keywords indicating event-related content
+const EVENT_KEYWORDS = [
+  "evento", "event", "concerto", "concert", "party", "festa",
+  "serata", "night", "live", "dj", "club", "disco", "rave",
+  "festival", "spettacolo", "show", "teatro", "theatre",
+  "mostra", "exhibition", "aperitivo", "happy hour",
+  "presentazione", "release", "opening", "inaugurazione",
+  "sabato", "saturday", "venerdi", "friday", "domenica", "sunday",
+  "ingresso", "ticket", "biglietti", "prevendita", "presale",
+  "palermo", "sicilia", "sicily",
+];
+
+// Location keywords for Palermo/Sicily
+const PALERMO_KEYWORDS = [
+  "palermo", "sicilia", "sicily", "mondello", "cefalù",
+  "bagheria", "monreale", "terrasini", "balestrate",
+  "via ", "piazza ", "corso ", // Italian address patterns
 ];
 
 function isBlockedSource(url: string): boolean {
   try {
     const hostname = new URL(url).hostname.replace(/^www\./, "");
-
-    // Check blocked domains
-    if (BLOCKED_DOMAINS.has(hostname)) {
-      return true;
-    }
-
-    // Check if domain ends with a blocked domain (subdomains)
+    if (BLOCKED_DOMAINS.has(hostname)) return true;
     for (const blocked of BLOCKED_DOMAINS) {
-      if (hostname.endsWith(`.${blocked}`)) {
-        return true;
-      }
+      if (hostname.endsWith(`.${blocked}`)) return true;
     }
-
-    // Check blocked URL patterns
     for (const pattern of BLOCKED_URL_PATTERNS) {
-      if (pattern.test(url)) {
-        return true;
-      }
+      if (pattern.test(url)) return true;
     }
-
     return false;
   } catch {
     return false;
   }
 }
 
+/**
+ * Validate an Instagram account for event relevance
+ */
+async function validateInstagramAccount(
+  handle: string,
+  logger: AgentLogger
+): Promise<ValidationResult> {
+  const result: ValidationResult = {
+    isValid: false,
+    score: 0,
+    checks: {
+      accountExists: false,
+      isPublic: false,
+      isActive: false,
+      isEventRelated: false,
+      isInPalermo: false,
+    },
+    notes: "",
+  };
+
+  try {
+    // Scrape the profile (limit to 5 posts for validation)
+    await logger.debug(`Validating @${handle}...`);
+    const posts = await scrapeInstagramProfile(handle, 5);
+
+    // Check 1: Account exists
+    if (!posts || posts.length === 0) {
+      result.notes = "No posts found or account is private/doesn't exist";
+      return result;
+    }
+    result.checks.accountExists = true;
+    result.score++;
+
+    // Check 2: Is public (if we got posts, it's public)
+    result.checks.isPublic = true;
+    result.score++;
+    result.recentPosts = posts;
+
+    // Get account metadata from first post if available
+    const firstPost = posts[0] as any;
+    if (firstPost?.ownerFullName) {
+      result.bio = firstPost.ownerFullName;
+    }
+    if (firstPost?.ownerUsername) {
+      // This confirms we have the right account
+    }
+
+    // Check 3: Is active (posted in last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const recentPost = posts.find(post => {
+      const postDate = new Date(post.timestamp);
+      return postDate >= thirtyDaysAgo;
+    });
+    
+    if (recentPost) {
+      result.checks.isActive = true;
+      result.score++;
+    } else {
+      result.notes += "No posts in last 30 days. ";
+    }
+
+    // Combine all captions for analysis
+    const allCaptions = posts.map(p => p.caption || "").join("\n");
+    const allHashtags = posts.flatMap(p => p.hashtags || []);
+    const combinedText = `${allCaptions} ${allHashtags.join(" ")}`.toLowerCase();
+
+    // Check 4: Is event-related (keyword + LLM check)
+    const keywordMatches = EVENT_KEYWORDS.filter(kw => combinedText.includes(kw.toLowerCase()));
+    
+    if (keywordMatches.length >= 3) {
+      // Strong keyword signal, use that
+      result.checks.isEventRelated = true;
+      result.score++;
+    } else if (keywordMatches.length >= 1) {
+      // Some keywords, use LLM for deeper analysis
+      const isEventRelated = await checkEventRelevanceWithLLM(handle, allCaptions, logger);
+      if (isEventRelated) {
+        result.checks.isEventRelated = true;
+        result.score++;
+      } else {
+        result.notes += "Content doesn't appear event-related. ";
+      }
+    } else {
+      result.notes += "No event-related keywords found. ";
+    }
+
+    // Check 5: Is in Palermo/Sicily
+    const locationMatches = PALERMO_KEYWORDS.filter(kw => combinedText.includes(kw.toLowerCase()));
+    if (locationMatches.length >= 1) {
+      result.checks.isInPalermo = true;
+      result.score++;
+    } else {
+      result.notes += "No Palermo/Sicily location indicators. ";
+    }
+
+    // Final determination
+    result.isValid = result.score >= 4;
+    result.notes = result.notes.trim() || `Validation score: ${result.score}/5`;
+
+    return result;
+  } catch (error) {
+    result.notes = `Validation error: ${error instanceof Error ? error.message : String(error)}`;
+    return result;
+  }
+}
+
+/**
+ * Use LLM to check if content is event-related
+ */
+async function checkEventRelevanceWithLLM(
+  handle: string,
+  captions: string,
+  logger: AgentLogger
+): Promise<boolean> {
+  try {
+    const truncatedCaptions = captions.slice(0, 2000); // Limit tokens
+    
+    const response = await openrouter.chat.completions.create({
+      model: config.llmModel,
+      messages: [
+        {
+          role: "system",
+          content: `You are analyzing an Instagram account to determine if it's an event organizer, venue, or promoter.
+Respond with ONLY "yes" or "no".
+
+Consider "yes" if the account appears to:
+- Organize parties, concerts, or events
+- Be a nightclub, venue, or event space
+- Promote music events, festivals, or shows
+- Be a DJ, artist, or performer who hosts events
+- Be a cultural organization hosting exhibitions or shows
+
+Consider "no" if the account appears to be:
+- A regular personal account
+- A business not related to events
+- A news/media outlet
+- A restaurant without event hosting`,
+        },
+        {
+          role: "user",
+          content: `Instagram handle: @${handle}\n\nRecent post captions:\n${truncatedCaptions}\n\nIs this an event-related account?`,
+        },
+      ],
+      max_tokens: 10,
+      temperature: 0,
+    });
+
+    const answer = response.choices[0]?.message?.content?.toLowerCase().trim();
+    return answer === "yes";
+  } catch (error) {
+    await logger.warn(`LLM check failed for @${handle}: ${error instanceof Error ? error.message : String(error)}`);
+    return false; // Fail closed
+  }
+}
+
+/**
+ * Process potential sources from the queue
+ */
+async function processPotentialSources(
+  logger: AgentLogger,
+  stats: DiscoveryStats,
+  limit: number = 10
+): Promise<void> {
+  const pending = await getPendingPotentialSources(limit);
+  
+  if (pending.length === 0) {
+    await logger.info("No pending potential sources to process");
+    return;
+  }
+
+  await logger.info(`Processing ${pending.length} potential sources from queue`);
+
+  for (const source of pending) {
+    stats.potentialSourcesProcessed++;
+    stats.accountsChecked++;
+
+    try {
+      const validation = await validateInstagramAccount(source.handle, logger);
+      
+      // Track validation results
+      if (validation.checks.accountExists) stats.accountsPublic++;
+      if (validation.checks.isActive) stats.accountsActive++;
+      if (validation.checks.isEventRelated) stats.accountsEventRelated++;
+      if (validation.checks.isInPalermo) stats.accountsInPalermo++;
+
+      if (validation.score >= 5) {
+        // Perfect score - auto-enable
+        await createValidatedSource(source, validation, true, logger);
+        await updatePotentialSourceStatus(source.id, "validated", validation.score, validation.notes);
+        stats.sourcesValidated++;
+        await logger.success(`Auto-enabled @${source.handle} (score: 5/5)`);
+      } else if (validation.score === 4) {
+        // Good score - enable but flag for monitoring
+        await createValidatedSource(source, validation, true, logger);
+        await updatePotentialSourceStatus(source.id, "validated", validation.score, `${validation.notes} [Flagged for monitoring]`);
+        stats.sourcesValidated++;
+        await logger.info(`Enabled @${source.handle} with monitoring (score: 4/5)`);
+      } else {
+        // Low score - skip
+        await updatePotentialSourceStatus(source.id, "skipped", validation.score, validation.notes);
+        stats.sourcesSkipped++;
+        await logger.debug(`Skipped @${source.handle} (score: ${validation.score}/5) - ${validation.notes}`);
+      }
+
+      // Rate limiting between validations
+      await sleep(2000);
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      await updatePotentialSourceStatus(source.id, "rejected", 0, `Error: ${errorMsg}`);
+      stats.sourcesRejected++;
+      await logger.warn(`Failed to validate @${source.handle}: ${errorMsg}`);
+    }
+  }
+}
+
+/**
+ * Create a validated event source
+ */
+async function createValidatedSource(
+  potentialSource: {
+    id: string;
+    handle: string;
+    discovered_via_source_id: string | null;
+    discovered_via_method: string;
+  },
+  validation: ValidationResult,
+  enabled: boolean,
+  logger: AgentLogger
+): Promise<void> {
+  const instagramUrl = `https://www.instagram.com/${potentialSource.handle}/`;
+  
+  // Try to create or find organizer
+  const organizerName = validation.bio || `@${potentialSource.handle}`;
+  const { organizer, created } = await findOrCreateOrganizer(organizerName);
+  
+  if (created) {
+    await logger.debug(`Created organizer: ${organizerName}`);
+  }
+
+  // Create event source with provenance
+  const sourceId = await createEventSourceWithProvenance({
+    url: instagramUrl,
+    type: "instagram",
+    instagramHandle: potentialSource.handle,
+    organizerId: organizer?.id,
+    discoveredViaSourceId: potentialSource.discovered_via_source_id || undefined,
+    discoveredViaMethod: potentialSource.discovered_via_method,
+    reliabilityScore: validation.score * 20, // Convert 0-5 to 0-100 scale
+    enabled,
+  });
+
+  if (sourceId) {
+    await logger.success(`Created event source for @${potentialSource.handle}`);
+  }
+}
+
+/**
+ * Run web search discovery (original functionality)
+ */
+async function runWebSearchDiscovery(
+  logger: AgentLogger,
+  stats: DiscoveryStats
+): Promise<void> {
+  await logger.info("Running web search discovery...");
+
+  const searchResults = await searchEventSources(config.targetMetro);
+  stats.searchesPerformed = 14;
+  stats.resultsFound = searchResults.length;
+
+  await logger.info(`Found ${searchResults.length} search results`);
+
+  // Get existing URLs
+  const { data: existingAggregators } = await getSupabase()
+    .from("event_aggregators")
+    .select("base_url, events_url");
+
+  const existingUrls = new Set<string>();
+  existingAggregators?.forEach((a) => {
+    if (a.base_url) existingUrls.add(normalizeUrl(a.base_url));
+    if (a.events_url) existingUrls.add(normalizeUrl(a.events_url));
+  });
+
+  // Also check event_sources
+  const { data: existingSources } = await getSupabase()
+    .from("event_sources")
+    .select("url");
+  
+  existingSources?.forEach((s) => {
+    if (s.url) existingUrls.add(normalizeUrl(s.url));
+  });
+
+  for (const result of searchResults) {
+    const normalizedUrl = normalizeUrl(result.url);
+
+    if (isBlockedSource(result.url)) {
+      stats.blockedSkipped++;
+      continue;
+    }
+
+    if (existingUrls.has(normalizedUrl)) {
+      stats.duplicatesSkipped++;
+      continue;
+    }
+
+    const aggregatorMatch = AGGREGATOR_PATTERNS.find((p) => p.pattern.test(result.url));
+    const looksLikeEventPage = EVENT_PAGE_PATTERNS.some((p) => 
+      p.test(result.url) || p.test(result.title)
+    );
+
+    if (aggregatorMatch || looksLikeEventPage) {
+      const slug = extractSiteName(result.url).toLowerCase().replace(/[^a-z0-9]+/g, "-");
+
+      const { error } = await getSupabase().from("event_aggregators").insert({
+        name: aggregatorMatch?.name || extractSiteName(result.url),
+        slug,
+        base_url: getBaseUrl(result.url),
+        events_url: result.url,
+        is_active: false,
+        scrape_priority: aggregatorMatch?.priority || 30,
+        metro_area: config.targetMetro,
+      });
+
+      if (error) {
+        if (error.code === "23505") {
+          stats.duplicatesSkipped++;
+        }
+      } else {
+        await logger.success(`Added new aggregator: ${result.url}`);
+        existingUrls.add(normalizedUrl);
+        stats.newSourcesAdded++;
+      }
+    }
+  }
+}
+
 export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
   const startTime = Date.now();
   const errors: string[] = [];
-  const logger = new AgentLogger('discovery');
+  const logger = new AgentLogger("discovery");
 
   const stats: DiscoveryStats = {
     searchesPerformed: 0,
@@ -148,137 +494,91 @@ export async function runDiscoveryAgent(): Promise<DiscoveryStats> {
     newSourcesAdded: 0,
     duplicatesSkipped: 0,
     blockedSkipped: 0,
+    potentialSourcesProcessed: 0,
+    sourcesValidated: 0,
+    sourcesRejected: 0,
+    sourcesSkipped: 0,
+    accountsChecked: 0,
+    accountsPublic: 0,
+    accountsActive: 0,
+    accountsEventRelated: 0,
+    accountsInPalermo: 0,
+    organizersCreated: 0,
   };
 
   try {
-    // Clean up any stuck runs from previous executions
     const cleanedUp = await cleanupStuckRuns();
     if (cleanedUp > 0) {
       console.log(`Cleaned up ${cleanedUp} stuck agent runs`);
     }
 
-    // Start the agent run in the database
     await logger.startRun();
-
-    await logger.info("Starting Discovery Agent...");
+    await logger.info("Starting Discovery Agent v2...");
     await logger.info(`Target metro: ${config.targetMetro}`);
 
-    // Search for event sources
-    const searchResults = await searchEventSources(config.targetMetro);
-    stats.searchesPerformed = 14; // We run 14 different queries
-    stats.resultsFound = searchResults.length;
+    // Phase 1: Process queued potential sources (from mentions/collabs)
+    if (isApifyConfigured()) {
+      await processPotentialSources(logger, stats, 10);
+    } else {
+      await logger.warn("Apify not configured - skipping Instagram validation");
+    }
 
-    await logger.info(`Found ${searchResults.length} search results`);
+    // Phase 2: Web search discovery
+    await runWebSearchDiscovery(logger, stats);
 
-    // Get existing aggregator URLs
-    const { data: existingAggregators } = await getSupabase()
-      .from("event_aggregators")
-      .select("base_url, events_url");
-
-    const existingUrls = new Set<string>();
-    existingAggregators?.forEach((a) => {
-      if (a.base_url) existingUrls.add(normalizeUrl(a.base_url));
-      if (a.events_url) existingUrls.add(normalizeUrl(a.events_url));
-    });
-
-    // Process search results
-    for (const result of searchResults) {
-      try {
-        const normalizedUrl = normalizeUrl(result.url);
-
-        // Skip blocked sources (social media, travel sites, etc.)
-        if (isBlockedSource(result.url)) {
-          stats.blockedSkipped++;
-          continue;
-        }
-
-        // Skip if already tracked
-        if (existingUrls.has(normalizedUrl)) {
-          stats.duplicatesSkipped++;
-          continue;
-        }
-
-        // Check if it matches known aggregator patterns
-        const aggregatorMatch = AGGREGATOR_PATTERNS.find((p) => p.pattern.test(result.url));
-
-        // Check if URL/title suggests event content
-        const looksLikeEventPage =
-          EVENT_PAGE_PATTERNS.some((p) => p.test(result.url) || p.test(result.title));
-
-        if (aggregatorMatch || looksLikeEventPage) {
-          // Add as new aggregator
-          const slug = extractSiteName(result.url).toLowerCase().replace(/[^a-z0-9]+/g, "-");
-
-          const { error } = await getSupabase().from("event_aggregators").insert({
-            name: aggregatorMatch?.name || extractSiteName(result.url),
-            slug,
-            base_url: getBaseUrl(result.url),
-            events_url: result.url,
-            is_active: false, // Require manual review
-            scrape_priority: aggregatorMatch?.priority || 30, // Use pattern priority or default
-            metro_area: config.targetMetro, // Set metro area for filtering
-          });
-
-          if (error) {
-            if (error.code === "23505") {
-              // Unique constraint violation
-              stats.duplicatesSkipped++;
-            } else {
-              await logger.error(`Failed to add aggregator: ${error.message}`);
-              errors.push(`Failed to add ${result.url}: ${error.message}`);
-            }
-          } else {
-            await logger.success(`Added new source: ${result.url}`);
-            existingUrls.add(normalizedUrl);
-            stats.newSourcesAdded++;
-          }
-        }
-      } catch (error) {
-        const errorMsg = `Error processing ${result.url}: ${error instanceof Error ? error.message : String(error)}`;
-        await logger.error(errorMsg);
-        errors.push(errorMsg);
-      }
+    // Phase 3: Log top hashtags (for monitoring)
+    const topHashtags = await getTopHashtags(10);
+    if (topHashtags.length > 0) {
+      await logger.info(`Top hashtags: ${topHashtags.map(h => `#${h.tag} (${h.occurrence_count})`).join(", ")}`);
     }
 
     // Send report
     const duration = Date.now() - startTime;
     const report: AgentReport = {
-      agentName: "Discovery Agent",
+      agentName: "Discovery Agent v2",
       status: errors.length === 0 ? "success" : errors.length < 3 ? "partial" : "failed",
       duration,
       stats: {
-        "Searches Performed": stats.searchesPerformed,
-        "Results Found": stats.resultsFound,
+        "Web Searches": stats.searchesPerformed,
+        "Search Results": stats.resultsFound,
         "New Sources Added": stats.newSourcesAdded,
         "Duplicates Skipped": stats.duplicatesSkipped,
         "Blocked Skipped": stats.blockedSkipped,
+        "Potential Sources Processed": stats.potentialSourcesProcessed,
+        "Sources Validated": stats.sourcesValidated,
+        "Sources Rejected": stats.sourcesRejected,
+        "Sources Skipped": stats.sourcesSkipped,
+        "Accounts Checked": stats.accountsChecked,
+        "Accounts Public": stats.accountsPublic,
+        "Accounts Active": stats.accountsActive,
+        "Event-Related": stats.accountsEventRelated,
+        "In Palermo": stats.accountsInPalermo,
       },
       errors,
     };
 
     await sendAgentReport(report);
 
-    // Complete the agent run in the database
-    const summary = `Found ${stats.resultsFound} results, added ${stats.newSourcesAdded} new sources`;
+    const summary = `Validated ${stats.sourcesValidated} sources, added ${stats.newSourcesAdded} aggregators`;
     await logger.completeRun(
-      errors.length === 0 ? 'completed' : 'failed',
+      errors.length === 0 ? "completed" : "failed",
       stats,
       summary,
-      errors.length > 0 ? errors.join('; ') : undefined
+      errors.length > 0 ? errors.join("; ") : undefined
     );
 
-    await logger.success("--- Discovery Complete ---");
-    await logger.info(`Results found: ${stats.resultsFound}`);
-    await logger.info(`New sources added: ${stats.newSourcesAdded}`);
-    await logger.info(`Duplicates skipped: ${stats.duplicatesSkipped}`);
-    await logger.info(`Blocked skipped: ${stats.blockedSkipped}`);
+    await logger.success("--- Discovery v2 Complete ---");
+    await logger.info(`Potential sources processed: ${stats.potentialSourcesProcessed}`);
+    await logger.info(`Sources validated: ${stats.sourcesValidated}`);
+    await logger.info(`Sources skipped: ${stats.sourcesSkipped}`);
+    await logger.info(`Web search sources added: ${stats.newSourcesAdded}`);
 
     return stats;
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     await logger.error(`Fatal error in discovery agent: ${errorMessage}`);
-    await logger.completeRun('failed', stats, 'Agent failed with fatal error', errorMessage);
-    await alertError(error instanceof Error ? error : new Error(String(error)), "Discovery Agent");
+    await logger.completeRun("failed", stats, "Agent failed with fatal error", errorMessage);
+    await alertError(error instanceof Error ? error : new Error(String(error)), "Discovery Agent v2");
     throw error;
   }
 }
@@ -312,4 +612,8 @@ function extractSiteName(url: string): string {
   } catch {
     return "Unknown Source";
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -12,3 +12,14 @@ export { findOrganizerByName, createOrganizer, findOrCreateOrganizer } from "./o
 export { findOrCreateCategory } from "./categories";
 export { getEventSources, createEventMention, updateSourceLastScraped, type EventSource } from "./sources";
 export { cleanupStuckRuns } from "./runs";
+export {
+  extractMentions,
+  extractHashtags,
+  updateHashtagStats,
+  queuePotentialSources,
+  getTopHashtags,
+  getPendingPotentialSources,
+  updatePotentialSourceStatus,
+  createEventSourceWithProvenance,
+  isHandleTracked,
+} from "./discovery";

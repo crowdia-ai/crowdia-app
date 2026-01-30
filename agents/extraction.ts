@@ -11,6 +11,10 @@ import {
   cleanupStuckRuns,
   createEventMention,
   updateSourceLastScraped,
+  extractMentions,
+  extractHashtags,
+  updateHashtagStats,
+  queuePotentialSources,
   type EventSource,
 } from "./db";
 import {
@@ -52,6 +56,11 @@ interface ExtractionStats {
   instagramSourcesProcessed: number;
   instagramPostsScraped: number;
   instagramApifyCost: number;
+  // Discovery v2 stats
+  mentionsExtracted: number;
+  hashtagsExtracted: number;
+  potentialSourcesQueued: number;
+  collabUsersExtracted: number;
 }
 
 interface ProcessedEvent {
@@ -243,6 +252,11 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
     instagramSourcesProcessed: 0,
     instagramPostsScraped: 0,
     instagramApifyCost: 0,
+    // Discovery v2 stats
+    mentionsExtracted: 0,
+    hashtagsExtracted: 0,
+    potentialSourcesQueued: 0,
+    collabUsersExtracted: 0,
   };
 
   try {
@@ -299,6 +313,83 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
           stats.instagramSourcesProcessed++;
 
           await logger.info(`Scraped ${posts.length} Instagram posts from @${source.instagramHandle}`);
+
+          // ========== DISCOVERY V2: Extract mentions, hashtags, collabs ==========
+          const allMentions: string[] = [];
+          const allHashtags: string[] = [];
+          const allCollabUsers: string[] = [];
+          const allTaggedUsers: string[] = [];
+
+          for (const post of posts) {
+            // Extract from caption
+            const mentions = extractMentions(post.caption || "");
+            const hashtags = extractHashtags(post.caption || "");
+            
+            allMentions.push(...mentions);
+            allHashtags.push(...hashtags);
+
+            // Extract coauthors (collaborative posts) - Apify field
+            if ((post as any).coAuthors && Array.isArray((post as any).coAuthors)) {
+              for (const coauthor of (post as any).coAuthors) {
+                if (coauthor.username) {
+                  allCollabUsers.push(coauthor.username);
+                }
+              }
+            }
+
+            // Extract tagged users - Apify field
+            if ((post as any).taggedUsers && Array.isArray((post as any).taggedUsers)) {
+              for (const tagged of (post as any).taggedUsers) {
+                if (tagged.username || tagged.full_name) {
+                  allTaggedUsers.push(tagged.username || tagged.full_name);
+                }
+              }
+            }
+          }
+
+          // Update hashtag stats
+          const uniqueHashtags = [...new Set(allHashtags)];
+          if (uniqueHashtags.length > 0) {
+            await updateHashtagStats(uniqueHashtags, source.id);
+            stats.hashtagsExtracted += uniqueHashtags.length;
+            await logger.debug(`Tracked ${uniqueHashtags.length} hashtags from @${source.instagramHandle}`);
+          }
+
+          // Queue mentions for discovery
+          const uniqueMentions = [...new Set(allMentions)];
+          if (uniqueMentions.length > 0) {
+            const { queued } = await queuePotentialSources(uniqueMentions, {
+              sourceId: source.id,
+              method: "mention",
+            });
+            stats.mentionsExtracted += uniqueMentions.length;
+            stats.potentialSourcesQueued += queued;
+            await logger.debug(`Queued ${queued} new mentions from @${source.instagramHandle}`);
+          }
+
+          // Queue collab users for discovery (higher priority)
+          const uniqueCollabs = [...new Set(allCollabUsers)];
+          if (uniqueCollabs.length > 0) {
+            const { queued } = await queuePotentialSources(uniqueCollabs, {
+              sourceId: source.id,
+              method: "collab_post",
+            });
+            stats.collabUsersExtracted += uniqueCollabs.length;
+            stats.potentialSourcesQueued += queued;
+            await logger.debug(`Queued ${queued} collab users from @${source.instagramHandle}`);
+          }
+
+          // Queue tagged users for discovery
+          const uniqueTagged = [...new Set(allTaggedUsers)];
+          if (uniqueTagged.length > 0) {
+            const { queued } = await queuePotentialSources(uniqueTagged, {
+              sourceId: source.id,
+              method: "tagged_user",
+            });
+            stats.potentialSourcesQueued += queued;
+            await logger.debug(`Queued ${queued} tagged users from @${source.instagramHandle}`);
+          }
+          // ========== END DISCOVERY V2 ==========
 
           // Convert posts to the format expected by the extraction function
           const postsForExtraction = posts.map((post: InstagramPost) => ({
@@ -588,6 +679,11 @@ export async function runExtractionAgent(): Promise<ExtractionStats> {
         "Rate Limit Errors": stats.rateLimitErrors,
         "Locations Created": stats.locationsCreated,
         "Organizers Created": stats.organizersCreated,
+        // Discovery v2 stats
+        "Mentions Extracted": stats.mentionsExtracted,
+        "Hashtags Extracted": stats.hashtagsExtracted,
+        "Potential Sources Queued": stats.potentialSourcesQueued,
+        "Collab Users Found": stats.collabUsersExtracted,
       },
       errors,
     };
