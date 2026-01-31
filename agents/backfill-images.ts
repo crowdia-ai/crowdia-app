@@ -22,10 +22,40 @@ const LISTING_PAGE_PATTERNS = [
   /teatromassimo\.it\/calendario\/?$/i,
   /orchestrasinfonicasiciliana\.it\/.*\/calendario\/?$/i,
   /teatrobiondo\.it\/spettacoli\/?$/i,
+  // Additional patterns for sources that store listing URLs
+  /enjoysicilia\.it\/.*feste-sagre-eventi/i,
+  /palermoviva\.it\/eventi-a-palermo\/?$/i,
+  /canzoni\.it\/concerti\/italia\/[a-z]+\/?$/i,
+  /rockol\.it\/concerti-[a-z]+-p-/i,
+  /teatrogoldenpalermo\.it\/eventi-in-programma\/?$/i,
+  /itinerarinellarte\.it\/.*\/eventi\/[a-z]+\/?$/i,
 ];
 
 // Sites that require headless browser
 const HEADLESS_DOMAINS = new Set(["ra.co", "dice.fm", "xceed.me", "teatro.it", "teatrobiondo.it"]);
+
+// Known generic/listing page images that should be filtered out
+const GENERIC_IMAGE_PATTERNS = [
+  /eventi-palermo-e-dintorni\.png$/i,  // enjoysicilia.it generic
+  /canzoni-fb\.png$/i,                  // canzoni.it generic
+  /teatro\.it-spettacoli-teatrali\.jpg$/i, // teatro.it listing
+  /\/default[-_]?image/i,
+  /\/placeholder/i,
+  /\/no[-_]?image/i,
+  /\/missing[-_]?image/i,
+  /\/generic[-_]?event/i,
+  /\/logo[-_]?(site|header|main)/i,
+];
+
+// Crowdia fallback image URL (uploaded to Supabase storage)
+const CROWDIA_FALLBACK_IMAGE = "https://mqcufztknioapxuzsevn.supabase.co/storage/v1/object/public/event-images/fallback/crowdia-logo.png";
+
+/**
+ * Check if an image URL is a known generic/listing image
+ */
+function isGenericImage(url: string): boolean {
+  return GENERIC_IMAGE_PATTERNS.some((pattern) => pattern.test(url));
+}
 
 function isListingPageUrl(url: string): boolean {
   return LISTING_PAGE_PATTERNS.some((pattern) => pattern.test(url));
@@ -79,6 +109,11 @@ function isValidImageUrl(url: string): boolean {
   if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
   if (url.includes("placeholder") || url.includes("default")) return false;
   if (url.length < 20) return false;
+  // Filter out known generic/listing images
+  if (isGenericImage(url)) {
+    console.log(`    ⚠️ Skipping generic image: ${url.substring(url.lastIndexOf('/') + 1)}`);
+    return false;
+  }
   return true;
 }
 
@@ -133,6 +168,16 @@ async function findEventUrl(
     query = `site:orchestrasinfonicasiciliana.it "${title}"`;
   } else if (domain === "teatrobiondo.it") {
     query = `site:teatrobiondo.it "${title}"`;
+  } else if (domain === "enjoysicilia.it") {
+    // enjoysicilia events - try to find specific event pages
+    query = `site:enjoysicilia.it "${title}"`;
+  } else if (domain === "palermotoday.it") {
+    query = `site:palermotoday.it "${title}"`;
+  } else if (domain === "canzoni.it" || domain === "rockol.it") {
+    // Music concert sites - search for specific concert page
+    query = `"${title}" concerto palermo sicilia`;
+  } else if (domain === "teatrogoldenpalermo.it") {
+    query = `site:teatrogoldenpalermo.it "${title}"`;
   } else {
     query = `"${title}" palermo evento`;
   }
@@ -263,25 +308,29 @@ export async function backfillImages(): Promise<void> {
         }
 
         // Extract image
-        const imageUrl = extractImageFromHtml(html);
+        let imageUrl = extractImageFromHtml(html);
+        let usingFallback = false;
 
         if (!imageUrl || !isValidImageUrl(imageUrl)) {
-          console.log(`  ⚠️ No valid image found\n`);
-          skipped++;
-          continue;
+          console.log(`  ⚠️ No valid image found, using Crowdia fallback`);
+          imageUrl = CROWDIA_FALLBACK_IMAGE;
+          usingFallback = true;
+        } else {
+          console.log(`  📷 Found image: ${imageUrl.substring(0, 60)}...`);
         }
 
-        console.log(`  📷 Found image: ${imageUrl.substring(0, 60)}...`);
-
-        // Upload image to Supabase Storage
-        const uploadResult = await uploadEventImage(event.id, imageUrl);
-
+        // Upload image to Supabase Storage (skip if using fallback - already in storage)
         let finalImageUrl = imageUrl;
-        if (uploadResult.success && uploadResult.publicUrl) {
-          console.log(`  ☁️ Uploaded to storage`);
-          finalImageUrl = uploadResult.publicUrl;
+        if (!usingFallback) {
+          const uploadResult = await uploadEventImage(event.id, imageUrl);
+          if (uploadResult.success && uploadResult.publicUrl) {
+            console.log(`  ☁️ Uploaded to storage`);
+            finalImageUrl = uploadResult.publicUrl;
+          } else {
+            console.log(`  ⚠️ Storage upload failed, using original URL`);
+          }
         } else {
-          console.log(`  ⚠️ Storage upload failed, using original URL`);
+          console.log(`  🫒 Using Crowdia fallback image`);
         }
 
         // Update the event with both new URL (if changed) and image
