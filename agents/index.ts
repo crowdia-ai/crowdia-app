@@ -7,17 +7,19 @@ Crowdia Event Scout Agents
 Usage: npx tsx agents/index.ts [options]
 
 Options:
-  --extraction    Run only the extraction agent (default)
-  --discovery     Run only the discovery agent
-  --both          Run both agents
-  --dry-run       Show what would be done without making changes
-  --help, -h      Show this help message
+  --extraction        Run only the extraction agent (default)
+  --discovery         Run only the discovery agent
+  --both              Run both agents
+  --max-sources=N     Limit extraction to N sources (default: all)
+  --dry-run           Show what would be done without making changes
+  --help, -h          Show this help message
 
 Examples:
   npm run agents                         # Run extraction agent
   npm run agents:extract                 # Run extraction agent
   npm run agents:discover                # Run discovery agent
   npm run agents:both                    # Run both agents
+  npm run agents -- --max-sources=20     # Run extraction with max 20 sources
   npm run agents -- --dry-run            # Preview without changes
 
 Environment variables required:
@@ -48,12 +50,14 @@ async function main() {
   const args = process.argv.slice(2);
   const agentType = parseAgentType(args);
   const dryRun = args.includes("--dry-run");
+  const maxSources = parseMaxSources(args);
 
   console.log("=".repeat(50));
   console.log("Crowdia Event Scout Agents");
   console.log("=".repeat(50));
   console.log(`Agent: ${agentType}`);
   console.log(`Dry run: ${dryRun}`);
+  if (maxSources) console.log(`Max sources: ${maxSources}`);
   console.log(`Started: ${new Date().toISOString()}`);
   console.log("=".repeat(50));
 
@@ -80,7 +84,7 @@ async function main() {
 
     if (agentType === "extraction" || agentType === "both") {
       console.log("\n--- Running Extraction Agent ---\n");
-      await runExtractionAgent();
+      await runExtractionAgent({ maxSourcesPerRun: maxSources });
     }
 
     console.log("\n" + "=".repeat(50));
@@ -104,6 +108,15 @@ function parseAgentType(args: string[]): AgentType {
   if (args.includes("--extraction")) return "extraction";
   if (args.includes("--both")) return "both";
   return "extraction";
+}
+
+function parseMaxSources(args: string[]): number | undefined {
+  const arg = args.find(a => a.startsWith("--max-sources="));
+  if (arg) {
+    const value = parseInt(arg.split("=")[1], 10);
+    if (!isNaN(value) && value > 0) return value;
+  }
+  return undefined;
 }
 
 main();
