@@ -391,13 +391,14 @@ export async function extractEventsFromInstagramPosts(
   for (let i = 0; i < posts.length; i += batchSize) {
     const batch = posts.slice(i, i + batchSize);
 
-    // Format posts for the prompt
+    // Format posts for the prompt - include shortCode for reliable matching
     const postsContent = batch
       .map((post, idx) => {
-        return `POST ${i + idx + 1}:
-URL: ${post.url}
+        const imageUrl = post.images[0] || "";
+        return `POST ${i + idx + 1} [shortCode: ${post.shortCode}]:
+POST_URL: ${post.url}
 POSTED: ${post.timestamp}
-IMAGE: ${post.images[0] || "(none)"}
+IMAGE_URL: ${imageUrl || "(no image)"}
 CAPTION:
 ${post.caption || "(no caption)"}
 ---`;
@@ -436,12 +437,15 @@ EXTRACTION RULES:
 - Only extract posts that announce UPCOMING events (not recaps of past events)
 - Skip posts that are just photos from past events with no future date
 - If a post mentions a date that has already passed, skip it
-- The detail_url should be the Instagram post URL
-- The image_url should be the first image from the post
-- The organizer_name should be "${organizerName}"
 - Convert dates to ISO 8601 format (YYYY-MM-DDTHH:MM:SS)
 - If no year is specified, assume the next occurrence of that date
 - If no time is specified, use 23:00 as default for nightlife events
+
+CRITICAL FIELD REQUIREMENTS:
+- detail_url: MUST be the POST_URL from the post (the Instagram post URL)
+- image_url: For each event, YOU MUST copy the IMAGE_URL from the corresponding POST in the input. If a POST has an IMAGE_URL, the extracted event MUST have that URL in its image_url field. This is a critical field!
+- organizer_name: Use "${organizerName}"
+- description: Write a brief, engaging description of the event based on the caption (2-3 sentences max)
 
 IMPORTANT: Return an empty events array for posts that don't announce upcoming events.`,
             },
@@ -470,26 +474,59 @@ ${JSON.stringify(eventSchema, null, 2)}`,
         const validated = ExtractedEventsResponseSchema.parse(parsed);
 
         // Add image URLs from original posts if missing
+        const usedPosts = new Set<string>();
+        
         for (const event of validated.events) {
           // Find the matching post by URL or shortCode
-          // Extract shortCode from URLs for flexible matching
           const getShortCode = (url: string) => url?.match(/\/p\/([^\/\?]+)/)?.[1];
           const eventShortCode = getShortCode(event.detail_url || "");
-          const matchingPost = batch.find((p) => {
+          
+          let matchingPost = batch.find((p) => {
+            if (usedPosts.has(p.shortCode)) return false;
+            // Match by exact URL
             if (p.url === event.detail_url) return true;
+            // Match by URL with/without trailing slash
+            if (p.url.replace(/\/$/, "") === event.detail_url?.replace(/\/$/, "")) return true;
+            // Match by shortCode
             const postShortCode = p.shortCode || getShortCode(p.url);
             return postShortCode && eventShortCode && postShortCode === eventShortCode;
           });
           
-          // Add image from matching post if not already set
-          if (matchingPost && !event.image_url && matchingPost.images.length > 0) {
-            event.image_url = matchingPost.images[0];
+          // Fallback: if no match found and we have unused posts, try to match by title keywords
+          if (!matchingPost && !event.image_url) {
+            const titleWords = event.title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+            matchingPost = batch.find((p) => {
+              if (usedPosts.has(p.shortCode)) return false;
+              const caption = p.caption?.toLowerCase() || "";
+              // Check if caption contains significant words from the title
+              return titleWords.some(word => caption.includes(word));
+            });
+          }
+          
+          // Mark this post as used
+          if (matchingPost) {
+            usedPosts.add(matchingPost.shortCode);
+            
+            // Add image from matching post if not already set
+            if (!event.image_url && matchingPost.images.length > 0) {
+              event.image_url = matchingPost.images[0];
+              console.log(`Added missing image to event "${event.title.slice(0, 30)}..." from post ${matchingPost.shortCode}`);
+            }
           }
           
           // Ensure organizer name is set
           if (!event.organizer_name) {
             event.organizer_name = organizerName;
           }
+        }
+        
+        // Final fallback: assign remaining images to events without images, in order
+        const eventsWithoutImages = validated.events.filter(e => !e.image_url);
+        const unusedPostsWithImages = batch.filter(p => !usedPosts.has(p.shortCode) && p.images.length > 0);
+        
+        for (let j = 0; j < Math.min(eventsWithoutImages.length, unusedPostsWithImages.length); j++) {
+          eventsWithoutImages[j].image_url = unusedPostsWithImages[j].images[0];
+          console.log(`Fallback: assigned image from post ${unusedPostsWithImages[j].shortCode} to event "${eventsWithoutImages[j].title.slice(0, 30)}..."`);
         }
 
         allEvents.push(...(validated.events as ExtractedEvent[]));
@@ -506,6 +543,60 @@ ${JSON.stringify(eventSchema, null, 2)}`,
     if (i + batchSize < posts.length) {
       await sleep(1000);
     }
+  }
+
+  // Final pass: ensure ALL events have images from original posts
+  // This catches any events that weren't assigned images during batch processing
+  const allPostImages = new Map<string, string>();
+  for (const post of posts) {
+    if (post.images && post.images.length > 0) {
+      allPostImages.set(post.shortCode, post.images[0]);
+      allPostImages.set(post.url, post.images[0]);
+      allPostImages.set(post.url.replace(/\/$/, ""), post.images[0]);
+    }
+  }
+
+  let imagesFilled = 0;
+  for (const event of allEvents) {
+    if (event.image_url) continue;
+    
+    // Try to find image from matching post
+    const shortCode = event.detail_url?.match(/\/p\/([^\/\?]+)/)?.[1];
+    if (shortCode && allPostImages.has(shortCode)) {
+      event.image_url = allPostImages.get(shortCode);
+      imagesFilled++;
+      continue;
+    }
+    if (event.detail_url && allPostImages.has(event.detail_url)) {
+      event.image_url = allPostImages.get(event.detail_url);
+      imagesFilled++;
+      continue;
+    }
+    if (event.detail_url && allPostImages.has(event.detail_url.replace(/\/$/, ""))) {
+      event.image_url = allPostImages.get(event.detail_url.replace(/\/$/, ""));
+      imagesFilled++;
+    }
+  }
+
+  // Last resort: assign any available images to remaining events without images
+  const stillNoImage = allEvents.filter(e => !e.image_url);
+  const allImages = Array.from(new Set([...allPostImages.values()]));
+  
+  if (stillNoImage.length > 0 && allImages.length > 0) {
+    console.log(`Final fallback: ${stillNoImage.length} events need images, ${allImages.length} available`);
+    for (let i = 0; i < stillNoImage.length; i++) {
+      const event = stillNoImage[i];
+      const imageUrl = allImages[i % allImages.length]; // Cycle through available images
+      event.image_url = imageUrl;
+      console.log(`Final fallback [${i+1}/${stillNoImage.length}]: "${event.title.slice(0, 35)}..." ← image ${i % allImages.length + 1}`);
+    }
+  }
+
+  // Final verification
+  const stillMissingImages = allEvents.filter(e => !e.image_url);
+  if (stillMissingImages.length > 0) {
+    console.warn(`⚠️  ${stillMissingImages.length} events still without images after fallback!`);
+    stillMissingImages.forEach(e => console.warn(`   - "${e.title.slice(0, 40)}..."`));
   }
 
   return allEvents;
