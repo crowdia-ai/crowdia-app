@@ -8,13 +8,14 @@ import {
   useColorScheme,
 } from 'react-native';
 import { Colors, Spacing, Typography, Magenta } from '@/constants/theme';
+import type { TimeFilter } from '@/stores/eventsFilterStore';
 
-export type SortOption = 'date_asc' | 'date_desc' | 'popular' | 'nearby';
-export type TimeFilter = 'all' | 'today' | 'tomorrow' | 'this_week' | 'this_weekend';
+// Re-export types from store for backward compat
+export type { SortOption, TimeFilter } from '@/stores/eventsFilterStore';
 
 interface FilterBarProps {
-  sortBy: SortOption;
-  onSortChange: (sort: SortOption) => void;
+  sortBy: string;
+  onSortChange: (sort: any) => void;
   timeFilter: TimeFilter;
   onTimeFilterChange: (filter: TimeFilter) => void;
 }

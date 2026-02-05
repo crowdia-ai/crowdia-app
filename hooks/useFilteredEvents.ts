@@ -10,11 +10,12 @@ const ITEMS_PER_PAGE = 20;
  * Used by the list view.
  */
 export function useFilteredEventsInfinite() {
-  const { debouncedSearch, sortBy, timeFilter, since } = useEventsFilterStore();
+  const { debouncedSearch, sortBy, timeFilter, categoryIds, since } =
+    useEventsFilterStore();
 
   const queryKey = useMemo(
-    () => ['events', debouncedSearch, sortBy, timeFilter, since],
-    [debouncedSearch, sortBy, timeFilter, since]
+    () => ['events', debouncedSearch, sortBy, timeFilter, categoryIds, since],
+    [debouncedSearch, sortBy, timeFilter, categoryIds, since]
   );
 
   const query = useInfiniteQuery({
@@ -24,6 +25,7 @@ export function useFilteredEventsInfinite() {
         search: debouncedSearch,
         sortBy,
         timeFilter,
+        categoryIds,
         limit: ITEMS_PER_PAGE,
         offset: pageParam,
         since,
@@ -54,11 +56,12 @@ export function useFilteredEventsInfinite() {
  * Used by the map view to show all markers at once.
  */
 export function useFilteredEventsForMap() {
-  const { debouncedSearch, sortBy, timeFilter, since } = useEventsFilterStore();
+  const { debouncedSearch, sortBy, timeFilter, categoryIds, since } =
+    useEventsFilterStore();
 
   const queryKey = useMemo(
-    () => ['events-map', debouncedSearch, sortBy, timeFilter, since],
-    [debouncedSearch, sortBy, timeFilter, since]
+    () => ['events-map', debouncedSearch, sortBy, timeFilter, categoryIds, since],
+    [debouncedSearch, sortBy, timeFilter, categoryIds, since]
   );
 
   const query = useQuery({
@@ -68,6 +71,7 @@ export function useFilteredEventsForMap() {
         search: debouncedSearch,
         sortBy,
         timeFilter,
+        categoryIds,
         limit: 500, // Reasonable upper limit for map markers
         offset: 0,
         since,

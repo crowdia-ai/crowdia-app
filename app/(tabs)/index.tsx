@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
 import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { EventCard, SearchBar, FilterBar } from '@/components/events';
+import { EventCard, SearchBar } from '@/components/events';
+import { FilterDrawer } from '@/components/filters';
 import { GlowingLogo } from '@/components/ui/glowing-logo';
 import { Colors, Spacing, Typography, Magenta } from '@/constants/theme';
 import { EventWithStats } from '@/types/database';
@@ -24,13 +25,8 @@ export default function EventsFeedScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
 
-  const {
-    debouncedSearch,
-    sortBy,
-    timeFilter,
-    setSortBy,
-    setTimeFilter,
-  } = useEventsFilterStore();
+  const { debouncedSearch, hasActiveFilters } = useEventsFilterStore();
+  const [filterVisible, setFilterVisible] = useState(false);
 
   const { searchQuery, handleSearchChange } = useDebouncedSearch();
 
@@ -120,19 +116,19 @@ export default function EventsFeedScreen() {
         </View>
       </View>
 
-      {/* Search */}
+      {/* Search + Filter Button */}
       <SearchBar
         value={searchQuery}
         onChangeText={handleSearchChange}
         placeholder="Search events..."
+        onFilterPress={() => setFilterVisible(true)}
+        hasActiveFilters={hasActiveFilters()}
       />
 
-      {/* Filter Tabs */}
-      <FilterBar
-        sortBy={sortBy}
-        onSortChange={setSortBy}
-        timeFilter={timeFilter}
-        onTimeFilterChange={setTimeFilter}
+      {/* Filter Drawer */}
+      <FilterDrawer
+        visible={filterVisible}
+        onClose={() => setFilterVisible(false)}
       />
 
       {/* Events List */}

@@ -1,11 +1,12 @@
 import { supabase } from '@/lib/supabase';
 import { EventWithStats } from '@/types/database';
-import type { SortOption, TimeFilter } from '@/components/events/FilterBar';
+import type { SortOption, TimeFilter } from '@/stores/eventsFilterStore';
 
 export interface FetchEventsParams {
   search?: string;
   sortBy?: SortOption;
   timeFilter?: TimeFilter;
+  categoryIds?: string[];
   limit?: number;
   offset?: number;
   /** Stable timestamp for "now" to prevent pagination drift */
@@ -59,6 +60,7 @@ export async function fetchEvents({
   search = '',
   sortBy = 'date_asc',
   timeFilter = 'all',
+  categoryIds = [],
   limit = 20,
   offset = 0,
   since,
@@ -80,6 +82,11 @@ export async function fetchEvents({
   } else {
     // For 'all', only show upcoming events (from now onwards)
     query = query.gte('event_start_time', now.toISOString());
+  }
+
+  // Apply category filter
+  if (categoryIds.length > 0) {
+    query = query.in('category_id', categoryIds);
   }
 
   // Apply search filter (searches title, location, and category)

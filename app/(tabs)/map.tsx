@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { SearchBar, FilterBar } from '@/components/events';
+import { SearchBar } from '@/components/events';
+import { FilterDrawer } from '@/components/filters';
 import { EventsMap } from '@/components/maps';
 import { GlowingLogo } from '@/components/ui/glowing-logo';
 import { Colors, Spacing, Typography, Magenta } from '@/constants/theme';
@@ -20,13 +21,8 @@ export default function MapScreen() {
   const colors = Colors[colorScheme];
   const insets = useSafeAreaInsets();
 
-  const {
-    debouncedSearch,
-    sortBy,
-    timeFilter,
-    setSortBy,
-    setTimeFilter,
-  } = useEventsFilterStore();
+  const { debouncedSearch, hasActiveFilters } = useEventsFilterStore();
+  const [filterVisible, setFilterVisible] = useState(false);
 
   const { searchQuery, handleSearchChange } = useDebouncedSearch();
 
@@ -67,19 +63,19 @@ export default function MapScreen() {
         </View>
       </View>
 
-      {/* Search */}
+      {/* Search + Filter Button */}
       <SearchBar
         value={searchQuery}
         onChangeText={handleSearchChange}
         placeholder="Search events..."
+        onFilterPress={() => setFilterVisible(true)}
+        hasActiveFilters={hasActiveFilters()}
       />
 
-      {/* Filter Tabs */}
-      <FilterBar
-        sortBy={sortBy}
-        onSortChange={setSortBy}
-        timeFilter={timeFilter}
-        onTimeFilterChange={setTimeFilter}
+      {/* Filter Drawer */}
+      <FilterDrawer
+        visible={filterVisible}
+        onClose={() => setFilterVisible(false)}
       />
 
       {/* Map Content */}
