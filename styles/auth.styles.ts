@@ -1,4 +1,4 @@
-import { StyleSheet } from 'react-native';
+import { StyleSheet, Platform } from 'react-native';
 import { Colors, Spacing, Typography, BorderRadius } from '@/constants/theme';
 
 export const createAuthStyles = (isDark: boolean) => {
@@ -60,11 +60,16 @@ export const createAuthStyles = (isDark: boolean) => {
       borderRadius: BorderRadius.md,
       alignItems: 'center',
       marginTop: Spacing.lg,
-      shadowColor: Colors.magenta[500],
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.3,
-      shadowRadius: 8,
-      elevation: 4,
+      ...Platform.select({
+        ios: {
+          shadowColor: Colors.magenta[500],
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.3,
+          shadowRadius: 8,
+        },
+        android: { elevation: 4 },
+        default: { boxShadow: `0px 4px 8px ${Colors.magenta[500]}4D` },
+      }),
     },
     buttonDisabled: {
       opacity: 0.5,

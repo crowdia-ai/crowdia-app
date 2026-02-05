@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ActivityIndicator, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useState, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
@@ -14,23 +14,26 @@ export default function SignupScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const passwordRef = useRef<TextInput>(null);
   const confirmPasswordRef = useRef<TextInput>(null);
 
   const handleSignup = async () => {
+    setValidationError(null);
+
     if (!email || !password) {
-      Alert.alert('Error', 'Please enter email and password');
+      setValidationError('Please enter email and password');
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert('Error', 'Passwords do not match');
+      setValidationError('Passwords do not match');
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+      setValidationError('Password must be at least 6 characters');
       return;
     }
 
@@ -38,12 +41,13 @@ export default function SignupScreen() {
 
     try {
       await signUp(email, password);
-      // Redirect to onboarding to complete profile
       router.replace('/onboarding/user');
     } catch {
-      Alert.alert('Signup Failed', error || 'An error occurred');
+      // Error is displayed inline via the store's error state
     }
   };
+
+  const displayError = validationError || error;
 
   return (
     <>
@@ -64,7 +68,7 @@ export default function SignupScreen() {
               <Text style={styles.subtitle}>Join Crowdia today</Text>
             </View>
 
-            {error && <Text style={styles.errorText}>{error}</Text>}
+            {displayError && <Text style={styles.errorText}>{displayError}</Text>}
 
             <View style={styles.inputContainer}>
               <Text style={styles.inputLabel}>Email</Text>
@@ -77,6 +81,8 @@ export default function SignupScreen() {
                 editable={!isSigningUp}
                 autoCapitalize="none"
                 keyboardType="email-address"
+                autoComplete="email"
+                textContentType="emailAddress"
                 returnKeyType="next"
                 onSubmitEditing={() => passwordRef.current?.focus()}
                 blurOnSubmit={false}
@@ -94,6 +100,8 @@ export default function SignupScreen() {
                 onChangeText={setPassword}
                 editable={!isSigningUp}
                 secureTextEntry
+                autoComplete="password-new"
+                textContentType="newPassword"
                 returnKeyType="next"
                 onSubmitEditing={() => confirmPasswordRef.current?.focus()}
                 blurOnSubmit={false}
@@ -112,13 +120,19 @@ export default function SignupScreen() {
                 onChangeText={setConfirmPassword}
                 editable={!isSigningUp}
                 secureTextEntry
+                autoComplete="password-new"
+                textContentType="newPassword"
                 returnKeyType="go"
                 onSubmitEditing={handleSignup}
               />
             </View>
 
-            <TouchableOpacity
-              style={[styles.button, isSigningUp && styles.buttonDisabled]}
+            <Pressable
+              style={({ pressed }) => [
+                styles.button,
+                isSigningUp && styles.buttonDisabled,
+                pressed && { opacity: 0.8 },
+              ]}
               onPress={handleSignup}
               disabled={isSigningUp}
             >
@@ -127,7 +141,7 @@ export default function SignupScreen() {
               ) : (
                 <Text style={styles.buttonText}>Create Account</Text>
               )}
-            </TouchableOpacity>
+            </Pressable>
 
             <View style={styles.divider}>
               <View style={styles.dividerLine} />
@@ -135,12 +149,15 @@ export default function SignupScreen() {
               <View style={styles.dividerLine} />
             </View>
 
-            <TouchableOpacity
-              style={styles.secondaryButton}
+            <Pressable
+              style={({ pressed }) => [
+                styles.secondaryButton,
+                pressed && { opacity: 0.8 },
+              ]}
               onPress={() => router.push('/auth/login')}
             >
               <Text style={styles.secondaryButtonText}>Sign In to Existing Account</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>

@@ -21,6 +21,7 @@ const MAPPING = {
   'magnifyingglass': 'search',
   'person.fill': 'person',
   'gearshape.fill': 'settings',
+  'map': 'map',
 } as IconMapping;
 
 /**

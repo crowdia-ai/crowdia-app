@@ -37,7 +37,7 @@ export function FilterBar({
   const colors = Colors[colorScheme];
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { borderBottomColor: colors.divider }]}>
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -74,7 +74,6 @@ export function FilterBar({
 const styles = StyleSheet.create({
   container: {
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   scrollContent: {
     paddingHorizontal: Spacing.md,

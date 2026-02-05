@@ -1,28 +1,24 @@
-import React, { useCallback, useMemo } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  RefreshControl,
   ActivityIndicator,
   useColorScheme,
 } from 'react-native';
-import { FlashList } from '@shopify/flash-list';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { EventCard, SearchBar, FilterBar } from '@/components/events';
+import { SearchBar, FilterBar } from '@/components/events';
+import { EventsMap } from '@/components/maps';
 import { GlowingLogo } from '@/components/ui/glowing-logo';
 import { Colors, Spacing, Typography, Magenta } from '@/constants/theme';
-import { EventWithStats } from '@/types/database';
 import { useEventsFilterStore } from '@/stores/eventsFilterStore';
-import { useFilteredEventsInfinite } from '@/hooks/useFilteredEvents';
+import { useFilteredEventsForMap } from '@/hooks/useFilteredEvents';
 import { useDebouncedSearch } from '@/hooks/useDebouncedSearch';
 
-export default function EventsFeedScreen() {
+export default function MapScreen() {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = Colors[colorScheme];
   const insets = useSafeAreaInsets();
-  const router = useRouter();
 
   const {
     debouncedSearch,
@@ -35,64 +31,13 @@ export default function EventsFeedScreen() {
   const { searchQuery, handleSearchChange } = useDebouncedSearch();
 
   const {
-    events,
+    eventsWithCoordinates,
     isLoading,
     isError,
     error,
-    refetch,
-    isRefetching,
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-  } = useFilteredEventsInfinite();
-
-  const handleEventPress = useCallback(
-    (eventId: string) => {
-      router.push(`/event/${eventId}`);
-    },
-    [router]
-  );
-
-  const renderEvent = useCallback(
-    ({ item }: { item: EventWithStats }) => (
-      <EventCard event={item} onPress={() => handleEventPress(item.id!)} />
-    ),
-    [handleEventPress]
-  );
-
-  const keyExtractor = useCallback((item: EventWithStats) => item.id!, []);
-
-  const handleEndReached = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) {
-      fetchNextPage();
-    }
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
-
-  const ListFooter = useMemo(() => {
-    if (!isFetchingNextPage) return null;
-    return (
-      <View style={styles.footerLoader}>
-        <ActivityIndicator size="small" color={Magenta[500]} />
-      </View>
-    );
-  }, [isFetchingNextPage]);
-
-  const EmptyState = useMemo(
-    () => (
-      <View style={styles.emptyState}>
-        <Text style={styles.emptyEmoji}>{debouncedSearch ? '🔍' : '📅'}</Text>
-        <Text style={[styles.emptyTitle, { color: colors.text }]}>
-          {debouncedSearch ? 'No events found' : 'No upcoming events'}
-        </Text>
-        <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
-          {debouncedSearch
-            ? 'Try a different search term'
-            : 'Check back later for new events'}
-        </Text>
-      </View>
-    ),
-    [debouncedSearch, colors]
-  );
+    totalCount,
+    mappableCount,
+  } = useFilteredEventsForMap();
 
   if (isError) {
     return (
@@ -109,6 +54,8 @@ export default function EventsFeedScreen() {
       </View>
     );
   }
+
+  const unmappableCount = totalCount - mappableCount;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -135,31 +82,27 @@ export default function EventsFeedScreen() {
         onTimeFilterChange={setTimeFilter}
       />
 
-      {/* Events List */}
+      {/* Map Content */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={Magenta[500]} />
         </View>
+      ) : eventsWithCoordinates.length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyEmoji}>
+            {debouncedSearch ? '🔍' : '📍'}
+          </Text>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            {debouncedSearch ? 'No events found' : 'No events with location'}
+          </Text>
+          <Text style={[styles.emptyText, { color: colors.textSecondary }]}>
+            {debouncedSearch
+              ? 'Try a different search term'
+              : 'Check back later for new events'}
+          </Text>
+        </View>
       ) : (
-        <FlashList
-          data={events}
-          renderItem={renderEvent}
-          keyExtractor={keyExtractor}
-          contentContainerStyle={styles.listContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefetching && !isFetchingNextPage}
-              onRefresh={refetch}
-              tintColor={Magenta[500]}
-              colors={[Magenta[500]]}
-            />
-          }
-          ListEmptyComponent={EmptyState}
-          ListFooterComponent={ListFooter}
-          onEndReached={handleEndReached}
-          onEndReachedThreshold={0.5}
-        />
+        <EventsMap events={eventsWithCoordinates} />
       )}
     </View>
   );
@@ -182,17 +125,24 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
   },
-  listContent: {
-    paddingTop: Spacing.sm,
-    paddingBottom: Spacing.xxxl,
+  statsBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+  },
+  statsText: {
+    fontSize: Typography.sm,
+    fontWeight: '500',
+  },
+  statsTextMuted: {
+    fontSize: Typography.sm,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
-    alignItems: 'center',
-  },
-  footerLoader: {
-    paddingVertical: Spacing.lg,
     alignItems: 'center',
   },
   emptyState: {

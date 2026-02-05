@@ -5,6 +5,8 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
+  Alert,
+  Platform,
   useColorScheme,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -12,6 +14,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/authStore';
 import { useRouter } from 'expo-router';
 import { Colors, Magenta, Charcoal, Spacing, BorderRadius, Typography } from '@/constants/theme';
+import { GlowingLogo } from '@/components/ui/glowing-logo';
+
+const numberFormatter = new Intl.NumberFormat();
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -20,11 +25,31 @@ export default function ProfileScreen() {
   const colors = Colors[colorScheme];
   const insets = useSafeAreaInsets();
 
-  const handleLogout = async () => {
-    try {
-      await logout();
-    } catch {
-      alert('Logout failed');
+  const handleLogout = () => {
+    if (Platform.OS === 'web') {
+      // On web, use window.confirm for non-blocking confirmation
+      if (window.confirm('Are you sure you want to sign out?')) {
+        logout().catch(() => {
+          // Display error inline if needed
+        });
+      }
+    } else {
+      Alert.alert(
+        'Sign Out',
+        'Are you sure you want to sign out?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Sign Out',
+            style: 'destructive',
+            onPress: () => {
+              logout().catch(() => {
+                Alert.alert('Error', 'Failed to sign out. Please try again.');
+              });
+            },
+          },
+        ]
+      );
     }
   };
 
@@ -42,8 +67,11 @@ export default function ProfileScreen() {
   if (!user) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
-        <View style={[styles.header, { paddingTop: insets.top + Spacing.lg }]}>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Profile</Text>
+        <View style={[styles.header, { paddingTop: insets.top + Spacing.sm }]}>
+          <View style={styles.headerRow}>
+            <GlowingLogo size={32} />
+            <Text style={[styles.headerTitle, { color: colors.text }]}>Crowdia</Text>
+          </View>
         </View>
 
         <View style={styles.centeredContent}>
@@ -88,7 +116,7 @@ export default function ProfileScreen() {
         style={styles.scrollView}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + Spacing.lg },
+          { paddingTop: insets.top + Spacing.sm },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -102,18 +130,18 @@ export default function ProfileScreen() {
           <Text style={[styles.displayName, { color: colors.text }]}>
             {userProfile?.display_name || 'User'}
           </Text>
-          {userProfile?.username && (
+          {userProfile?.username ? (
             <Text style={[styles.username, { color: colors.textSecondary }]}>
               @{userProfile.username}
             </Text>
-          )}
+          ) : null}
         </View>
 
         {/* Stats Row */}
         <View style={[styles.statsRow, { backgroundColor: colors.card }]}>
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: Magenta[500] }]}>
-              {userProfile?.points || 0}
+              {numberFormatter.format(userProfile?.points || 0)}
             </Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
               Points
@@ -122,7 +150,7 @@ export default function ProfileScreen() {
           <View style={[styles.statDivider, { backgroundColor: colors.divider }]} />
           <View style={styles.statItem}>
             <Text style={[styles.statValue, { color: Magenta[500] }]}>
-              {userProfile?.check_ins_count || 0}
+              {numberFormatter.format(userProfile?.check_ins_count || 0)}
             </Text>
             <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
               Check-ins
@@ -170,7 +198,7 @@ export default function ProfileScreen() {
         </View>
 
         {/* Organization Section */}
-        {organizerProfile && (
+        {organizerProfile ? (
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>
               ORGANIZATION
@@ -210,7 +238,7 @@ export default function ProfileScreen() {
               </View>
             </View>
           </View>
-        )}
+        ) : null}
 
         {/* Points Breakdown */}
         <View style={styles.section}>
@@ -227,7 +255,7 @@ export default function ProfileScreen() {
               </View>
               <Text style={[styles.pointsRowValue, { color: Magenta[500] }]}>+10</Text>
             </View>
-            {userProfile?.email_confirmed_points_awarded && (
+            {userProfile?.email_confirmed_points_awarded ? (
               <>
                 <View style={[styles.cardDivider, { backgroundColor: colors.divider }]} />
                 <View style={styles.pointsRow}>
@@ -240,8 +268,8 @@ export default function ProfileScreen() {
                   <Text style={[styles.pointsRowValue, { color: Magenta[500] }]}>+50</Text>
                 </View>
               </>
-            )}
-            {userProfile?.display_name && userProfile?.username && (
+            ) : null}
+            {userProfile?.display_name && userProfile?.username ? (
               <>
                 <View style={[styles.cardDivider, { backgroundColor: colors.divider }]} />
                 <View style={styles.pointsRow}>
@@ -254,7 +282,7 @@ export default function ProfileScreen() {
                   <Text style={[styles.pointsRowValue, { color: Magenta[500] }]}>+25</Text>
                 </View>
               </>
-            )}
+            ) : null}
           </View>
         </View>
 
@@ -279,13 +307,17 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    paddingHorizontal: Spacing.lg,
-    paddingBottom: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingBottom: Spacing.sm,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
   },
   headerTitle: {
-    fontSize: Typography.xxxl,
-    fontWeight: '800',
-    letterSpacing: -0.5,
+    fontSize: 24,
+    fontWeight: '700',
   },
   scrollView: {
     flex: 1,
@@ -389,6 +421,7 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: Typography.xxl,
     fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   statLabel: {
     fontSize: Typography.xs,
@@ -460,6 +493,7 @@ const styles = StyleSheet.create({
   pointsRowValue: {
     fontSize: Typography.base,
     fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
 
   // Logout

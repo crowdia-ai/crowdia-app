@@ -11,6 +11,12 @@ interface MapSectionProps {
   onPress: () => void;
 }
 
+// Web Google Maps component - only imported on web
+let WebGoogleMap: React.ComponentType<any> | null = null;
+if (Platform.OS === 'web') {
+  WebGoogleMap = require('./WebGoogleMap').WebGoogleMap;
+}
+
 // Native MapView - only imported on native platforms
 let NativeMapView: React.ComponentType<any> | null = null;
 let NativeMarker: React.ComponentType<any> | null = null;
@@ -43,10 +49,8 @@ const darkMapStyle = [
 export function MapSection({ latitude, longitude, locationName, colorScheme, onPress }: MapSectionProps) {
   const colors = Colors[colorScheme];
 
-  // For web, use Google Maps embed iframe
-  if (Platform.OS === 'web') {
-    const apiKey = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-
+  // For web, use Google Maps JavaScript API
+  if (Platform.OS === 'web' && WebGoogleMap) {
     return (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Location</Text>
@@ -54,16 +58,10 @@ export function MapSection({ latitude, longitude, locationName, colorScheme, onP
           style={[styles.mapContainer, { backgroundColor: colors.card }]}
           onPress={onPress}
         >
-          <iframe
-            src={`https://www.google.com/maps/embed/v1/place?key=${apiKey}&q=${latitude},${longitude}&zoom=15`}
-            style={{
-              border: 0,
-              width: '100%',
-              height: '100%',
-            }}
-            allowFullScreen
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
+          <WebGoogleMap
+            latitude={latitude}
+            longitude={longitude}
+            colorScheme={colorScheme}
           />
           <View style={[styles.mapOverlay, { backgroundColor: colors.card }]}>
             <Ionicons name="navigate" size={16} color={Magenta[500]} />

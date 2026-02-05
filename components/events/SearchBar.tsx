@@ -4,10 +4,11 @@ import {
   TextInput,
   StyleSheet,
   Pressable,
+  Platform,
   useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Colors, Spacing, BorderRadius, Typography } from '@/constants/theme';
+import { Colors, Spacing, BorderRadius, Typography, Magenta } from '@/constants/theme';
 
 interface SearchBarProps {
   value: string;
@@ -28,11 +29,13 @@ export function SearchBar({
     onChangeText('');
   }, [onChangeText]);
 
-  const styles = createStyles(colors, isFocused);
-
   return (
     <View style={styles.container}>
-      <View style={styles.searchContainer}>
+      <View style={[
+        styles.searchContainer,
+        { backgroundColor: colors.inputBackground },
+        isFocused && { borderColor: Magenta[500], borderWidth: 1 },
+      ]}>
         <Ionicons
           name="search"
           size={20}
@@ -40,7 +43,7 @@ export function SearchBar({
           style={styles.searchIcon}
         />
         <TextInput
-          style={styles.input}
+          style={[styles.input, { color: colors.text }, webInputStyle]}
           value={value}
           onChangeText={onChangeText}
           placeholder={placeholder}
@@ -65,30 +68,33 @@ export function SearchBar({
   );
 }
 
-const createStyles = (colors: typeof Colors.dark, isFocused: boolean) =>
-  StyleSheet.create({
-    container: {
-      paddingHorizontal: Spacing.md,
-      paddingVertical: Spacing.sm,
-    },
-    searchContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.inputBackground,
-      borderRadius: BorderRadius.lg,
-      paddingHorizontal: Spacing.md,
-    },
-    searchIcon: {
-      marginRight: Spacing.sm,
-    },
-    input: {
-      flex: 1,
-      fontSize: Typography.sm,
-      color: colors.text,
-      paddingVertical: Spacing.md,
-      outlineStyle: 'none',
-    } as any,
-    clearButton: {
-      padding: Spacing.xs,
-    },
-  });
+const webInputStyle = Platform.select({
+  web: { outlineStyle: 'none' } as any,
+  default: {},
+});
+
+const styles = StyleSheet.create({
+  container: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  searchIcon: {
+    marginRight: Spacing.sm,
+  },
+  input: {
+    flex: 1,
+    fontSize: Typography.sm,
+    paddingVertical: Spacing.md,
+  },
+  clearButton: {
+    padding: Spacing.xs,
+  },
+});

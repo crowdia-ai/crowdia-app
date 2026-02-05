@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import {
   View,
   Text,
@@ -20,21 +20,21 @@ interface EventCardProps {
   onPress?: () => void;
 }
 
-export function EventCard({ event, onPress }: EventCardProps) {
+const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return {
+    day: date.getDate(),
+    month: date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
+    time: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+    weekday: date.toLocaleDateString('en-US', { weekday: 'short' }),
+  };
+};
+
+export const EventCard = memo(function EventCard({ event, onPress }: EventCardProps) {
   const colorScheme = useColorScheme() ?? 'dark';
   const colors = Colors[colorScheme];
 
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return {
-      day: date.getDate(),
-      month: date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
-      time: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      weekday: date.toLocaleDateString('en-US', { weekday: 'short' }),
-    };
-  };
-
-  const dateInfo = formatDate(event.event_start_time);
+  const dateInfo = formatDate(event.event_start_time ?? new Date().toISOString());
   const imageUrl = getProxiedImageUrl(event.cover_image_url);
   const hasValidImage = !!imageUrl;
 
@@ -108,7 +108,7 @@ export function EventCard({ event, onPress }: EventCardProps) {
       </View>
     </Pressable>
   );
-}
+});
 
 const IMAGE_SIZE = 100;
 

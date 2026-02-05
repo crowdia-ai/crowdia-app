@@ -9,7 +9,6 @@ import {
   Linking,
   Share,
   Platform,
-  Dimensions,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -28,6 +27,38 @@ import { MapSection } from '@/components/maps/MapSection';
 
 const HERO_HEIGHT = 320;
 
+const formatFullDate = (dateString: string) => {
+  const date = new Date(dateString);
+  return {
+    weekday: date.toLocaleDateString('en-US', { weekday: 'long' }),
+    date: date.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    }),
+    time: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
+    day: date.getDate(),
+    month: date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
+  };
+};
+
+const numberFormatter = new Intl.NumberFormat();
+
+// Header button component extracted outside render to avoid remount cycles
+function HeaderButton({ onPress, icon, size = 24 }: { onPress: () => void; icon: string; size?: number }) {
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.headerButton,
+        pressed && styles.headerButtonPressed
+      ]}
+      onPress={onPress}
+    >
+      <Ionicons name={icon as any} size={size} color="#fff" />
+    </Pressable>
+  );
+}
+
 export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
@@ -44,21 +75,6 @@ export default function EventDetailScreen() {
   const imageUrl = getProxiedImageUrl(event?.cover_image_url);
   const hasValidImage = !!imageUrl;
 
-  const formatFullDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return {
-      weekday: date.toLocaleDateString('en-US', { weekday: 'long' }),
-      date: date.toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric'
-      }),
-      time: date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }),
-      day: date.getDate(),
-      month: date.toLocaleDateString('en-US', { month: 'short' }).toUpperCase(),
-    };
-  };
-
   const handleBack = () => {
     if (Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -74,8 +90,8 @@ export default function EventDetailScreen() {
 
     try {
       await Share.share({
-        title: event.title,
-        message: `Check out ${event.title} on Crowdia!\n\n${event.event_url || ''}`,
+        title: event.title ?? undefined,
+        message: `Check out ${event.title ?? 'this event'} on Crowdia!\n\n${event.event_url || ''}`,
         url: event.event_url || undefined,
       });
     } catch (error) {
@@ -116,19 +132,6 @@ export default function EventDetailScreen() {
     if (url) Linking.openURL(url);
   };
 
-  // Header button component (simpler than BlurView for web compatibility)
-  const HeaderButton = ({ onPress, icon, size = 24 }: { onPress: () => void; icon: string; size?: number }) => (
-    <Pressable
-      style={({ pressed }) => [
-        styles.headerButton,
-        pressed && styles.headerButtonPressed
-      ]}
-      onPress={onPress}
-    >
-      <Ionicons name={icon as any} size={size} color="#fff" />
-    </Pressable>
-  );
-
   if (isLoading) {
     return (
       <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -156,7 +159,7 @@ export default function EventDetailScreen() {
     );
   }
 
-  const dateInfo = formatFullDate(event.event_start_time);
+  const dateInfo = formatFullDate(event.event_start_time ?? new Date().toISOString());
   const hasLocation = event.location_lat && event.location_lng;
 
 
@@ -166,6 +169,7 @@ export default function EventDetailScreen() {
         showsVerticalScrollIndicator={false}
         bounces={true}
         contentContainerStyle={{ paddingBottom: insets.bottom + 100 }}
+        contentInsetAdjustmentBehavior="automatic"
       >
         {/* Hero Image Section */}
         <View style={styles.heroContainer}>
@@ -233,9 +237,9 @@ export default function EventDetailScreen() {
                 </Text>
                 <Text style={[styles.infoSubLabel, { color: colors.textSecondary }]}>
                   {dateInfo.time}
-                  {event.event_end_time && (
-                    ` - ${formatFullDate(event.event_end_time).time}`
-                  )}
+                  {event.event_end_time
+                    ? ` - ${formatFullDate(event.event_end_time).time}`
+                    : null}
                 </Text>
               </View>
             </View>
@@ -254,75 +258,75 @@ export default function EventDetailScreen() {
                 <Text style={[styles.infoLabel, { color: colors.text }]}>
                   {event.location_name}
                 </Text>
-                {event.location_address && (
+                {event.location_address ? (
                   <Text style={[styles.infoSubLabel, { color: colors.textSecondary }]} numberOfLines={2}>
                     {event.location_address}
                   </Text>
-                )}
+                ) : null}
               </View>
-              {hasLocation && (
+              {hasLocation ? (
                 <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
-              )}
+              ) : null}
             </View>
           </Pressable>
 
           {/* Description */}
-          {event.description && (
+          {event.description ? (
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: colors.text }]}>About</Text>
               <Text style={[styles.description, { color: colors.textSecondary }]}>
                 {event.description}
               </Text>
             </View>
-          )}
+          ) : null}
 
           {/* Map */}
-          {hasLocation && (
+          {hasLocation ? (
             <MapSection
               latitude={event.location_lat!}
               longitude={event.location_lng!}
-              locationName={event.location_name}
+              locationName={event.location_name ?? ''}
               colorScheme={colorScheme}
               onPress={handleOpenMaps}
             />
-          )}
+          ) : null}
 
           {/* Stats */}
-          {(event.interested_count > 0 || event.check_ins_count > 0) && (
+          {((event.interested_count ?? 0) > 0 || (event.check_ins_count ?? 0) > 0) ? (
             <View style={[styles.statsCard, { backgroundColor: colors.card }]}>
-              {event.interested_count > 0 && (
+              {(event.interested_count ?? 0) > 0 ? (
                 <View style={styles.statItem}>
                   <Ionicons name="heart" size={18} color={Magenta[500]} />
                   <Text style={[styles.statNumber, { color: colors.text }]}>
-                    {event.interested_count}
+                    {numberFormatter.format(event.interested_count ?? 0)}
                   </Text>
                   <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
                     interested
                   </Text>
                 </View>
-              )}
-              {event.check_ins_count > 0 && (
+              ) : null}
+              {(event.check_ins_count ?? 0) > 0 ? (
                 <View style={styles.statItem}>
                   <Ionicons name="checkmark-circle" size={18} color={colors.success} />
                   <Text style={[styles.statNumber, { color: colors.text }]}>
-                    {event.check_ins_count}
+                    {numberFormatter.format(event.check_ins_count ?? 0)}
                   </Text>
                   <Text style={[styles.statLabel, { color: colors.textSecondary }]}>
                     going
                   </Text>
                 </View>
-              )}
+              ) : null}
             </View>
-          )}
+          ) : null}
 
           {/* Source */}
-          {event.source && (
+          {event.source ? (
             <View style={styles.sourceContainer}>
               <Text style={[styles.sourceText, { color: colors.textMuted }]}>
                 Source: {event.source}
               </Text>
             </View>
-          )}
+          ) : null}
         </View>
       </ScrollView>
 
@@ -472,11 +476,16 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: Magenta[500],
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: Magenta[500],
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: { elevation: 8 },
+      default: { boxShadow: `0px 4px 8px ${Magenta[500]}4D` },
+    }),
   },
   dateBadgeDay: {
     fontSize: 22,
@@ -552,6 +561,7 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: Typography.base,
     fontWeight: '700',
+    fontVariant: ['tabular-nums'],
   },
   statLabel: {
     fontSize: Typography.sm,

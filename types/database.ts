@@ -2141,3 +2141,6 @@ export const Constants = {
     Enums: {},
   },
 } as const
+
+// Convenience type aliases
+export type EventWithStats = Database['public']['Views']['events_with_stats']['Row']

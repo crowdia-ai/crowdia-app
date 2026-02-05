@@ -1,4 +1,4 @@
-import { View, Text, TextInput, TouchableOpacity, Alert, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
+import { View, Text, TextInput, Pressable, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
 import { useRouter, Stack } from 'expo-router';
 import { useState, useRef } from 'react';
 import { useAuthStore } from '@/stores/authStore';
@@ -13,12 +13,14 @@ export default function LoginScreen() {
   const { login, isLoggingIn, error, clearError } = useAuthStore();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   const passwordRef = useRef<TextInput>(null);
 
   const handleLogin = async () => {
+    setValidationError(null);
     if (!email || !password) {
-      Alert.alert('Error', 'Please fill in all fields');
+      setValidationError('Please fill in all fields');
       return;
     }
 
@@ -28,9 +30,11 @@ export default function LoginScreen() {
       await login(email, password);
       router.replace('/(tabs)');
     } catch {
-      Alert.alert('Login Failed', error || 'Invalid email or password');
+      // Error is displayed inline via the store's error state
     }
   };
+
+  const displayError = validationError || error;
 
   return (
     <>
@@ -49,7 +53,7 @@ export default function LoginScreen() {
           <Text style={styles.subtitle}>Sign in to continue</Text>
         </View>
 
-        {error && <Text style={styles.errorText}>{error}</Text>}
+        {displayError && <Text style={styles.errorText}>{displayError}</Text>}
 
         <View style={styles.inputContainer}>
           <Text style={styles.inputLabel}>Email</Text>
@@ -62,6 +66,8 @@ export default function LoginScreen() {
             editable={!isLoggingIn}
             autoCapitalize="none"
             keyboardType="email-address"
+            autoComplete="email"
+            textContentType="emailAddress"
             returnKeyType="next"
             onSubmitEditing={() => passwordRef.current?.focus()}
             blurOnSubmit={false}
@@ -79,16 +85,22 @@ export default function LoginScreen() {
             onChangeText={setPassword}
             editable={!isLoggingIn}
             secureTextEntry
+            autoComplete="password"
+            textContentType="password"
             returnKeyType="go"
             onSubmitEditing={handleLogin}
           />
-          <TouchableOpacity onPress={() => router.push('/auth/forgot-password')}>
+          <Pressable onPress={() => router.push('/auth/forgot-password')}>
             <Text style={styles.forgotPasswordLink}>Forgot password?</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
-        <TouchableOpacity
-          style={[styles.button, isLoggingIn && styles.buttonDisabled]}
+        <Pressable
+          style={({ pressed }) => [
+            styles.button,
+            isLoggingIn && styles.buttonDisabled,
+            pressed && { opacity: 0.8 },
+          ]}
           onPress={handleLogin}
           disabled={isLoggingIn}
         >
@@ -97,7 +109,7 @@ export default function LoginScreen() {
           ) : (
             <Text style={styles.buttonText}>Sign In</Text>
           )}
-        </TouchableOpacity>
+        </Pressable>
 
         <View style={styles.divider}>
           <View style={styles.dividerLine} />
@@ -105,12 +117,15 @@ export default function LoginScreen() {
           <View style={styles.dividerLine} />
         </View>
 
-        <TouchableOpacity
-          style={styles.secondaryButton}
+        <Pressable
+          style={({ pressed }) => [
+            styles.secondaryButton,
+            pressed && { opacity: 0.8 },
+          ]}
           onPress={() => router.push('/auth/signup')}
         >
           <Text style={styles.secondaryButtonText}>Create New Account</Text>
-        </TouchableOpacity>
+        </Pressable>
       </KeyboardAvoidingView>
     </>
   );
