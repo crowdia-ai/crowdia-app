@@ -9,6 +9,7 @@ export interface EventSource {
   organizerId?: string;
   locationId?: string;
   reliabilityScore?: number;
+  last_scraped_at?: string | null;
 }
 
 /**
@@ -53,6 +54,7 @@ async function getEventSourcesNewSchema(): Promise<EventSource[]> {
       is_aggregator,
       reliability_score,
       instagram_handle,
+      last_scraped_at,
       organizers:organizer_id (id, organization_name, instagram_handle),
       locations:location_id (id, name)
     `)
@@ -91,6 +93,7 @@ async function getEventSourcesNewSchema(): Promise<EventSource[]> {
       organizerId: s.organizer_id,
       locationId: s.location_id,
       reliabilityScore: s.reliability_score,
+      last_scraped_at: s.last_scraped_at,
     });
   });
   

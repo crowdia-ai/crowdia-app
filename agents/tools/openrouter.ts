@@ -492,17 +492,6 @@ ${JSON.stringify(eventSchema, null, 2)}`,
             return postShortCode && eventShortCode && postShortCode === eventShortCode;
           });
           
-          // Fallback: if no match found and we have unused posts, try to match by title keywords
-          if (!matchingPost && !event.image_url) {
-            const titleWords = event.title.toLowerCase().split(/\s+/).filter(w => w.length > 3);
-            matchingPost = batch.find((p) => {
-              if (usedPosts.has(p.shortCode)) return false;
-              const caption = p.caption?.toLowerCase() || "";
-              // Check if caption contains significant words from the title
-              return titleWords.some(word => caption.includes(word));
-            });
-          }
-          
           // Mark this post as used
           if (matchingPost) {
             usedPosts.add(matchingPost.shortCode);
@@ -518,15 +507,6 @@ ${JSON.stringify(eventSchema, null, 2)}`,
           if (!event.organizer_name) {
             event.organizer_name = organizerName;
           }
-        }
-        
-        // Final fallback: assign remaining images to events without images, in order
-        const eventsWithoutImages = validated.events.filter(e => !e.image_url);
-        const unusedPostsWithImages = batch.filter(p => !usedPosts.has(p.shortCode) && p.images.length > 0);
-        
-        for (let j = 0; j < Math.min(eventsWithoutImages.length, unusedPostsWithImages.length); j++) {
-          eventsWithoutImages[j].image_url = unusedPostsWithImages[j].images[0];
-          console.log(`Fallback: assigned image from post ${unusedPostsWithImages[j].shortCode} to event "${eventsWithoutImages[j].title.slice(0, 30)}..."`);
         }
 
         allEvents.push(...(validated.events as ExtractedEvent[]));
@@ -578,24 +558,10 @@ ${JSON.stringify(eventSchema, null, 2)}`,
     }
   }
 
-  // Last resort: assign any available images to remaining events without images
-  const stillNoImage = allEvents.filter(e => !e.image_url);
-  const allImages = Array.from(new Set([...allPostImages.values()]));
-  
-  if (stillNoImage.length > 0 && allImages.length > 0) {
-    console.log(`Final fallback: ${stillNoImage.length} events need images, ${allImages.length} available`);
-    for (let i = 0; i < stillNoImage.length; i++) {
-      const event = stillNoImage[i];
-      const imageUrl = allImages[i % allImages.length]; // Cycle through available images
-      event.image_url = imageUrl;
-      console.log(`Final fallback [${i+1}/${stillNoImage.length}]: "${event.title.slice(0, 35)}..." ← image ${i % allImages.length + 1}`);
-    }
-  }
-
-  // Final verification
+  // Final verification - log events without images but don't assign random images
   const stillMissingImages = allEvents.filter(e => !e.image_url);
   if (stillMissingImages.length > 0) {
-    console.warn(`⚠️  ${stillMissingImages.length} events still without images after fallback!`);
+    console.warn(`⚠️  ${stillMissingImages.length} events without images (no matching post found):`);
     stillMissingImages.forEach(e => console.warn(`   - "${e.title.slice(0, 40)}..."`));
   }
 

@@ -273,27 +273,63 @@ async function findEventUrl(
   return null;
 }
 
-async function getEventsWithMissingImages(): Promise<EventWithMissingImage[]> {
-  const { data, error } = await getSupabase()
+async function getEventsWithMissingImages(includeBroken: boolean = false): Promise<EventWithMissingImage[]> {
+  const supabase = getSupabase();
+  
+  // Get events with no image
+  const { data: noImage, error: err1 } = await supabase
     .from("events")
-    .select("id, title, event_url")
-    .eq("cover_image_url", "")
+    .select("id, title, event_url, cover_image_url")
+    .or("cover_image_url.is.null,cover_image_url.eq.")
     .not("event_url", "is", null)
     .neq("event_url", "")
     .gte("event_start_time", new Date().toISOString());
 
-  if (error) {
-    console.error("Failed to fetch events:", error.message);
+  if (err1) {
+    console.error("Failed to fetch events with no image:", err1.message);
     return [];
   }
 
-  return data || [];
+  const results: EventWithMissingImage[] = (noImage || []).map(e => ({
+    id: e.id, title: e.title, event_url: e.event_url
+  }));
+
+  // Also get events with broken external URLs (not in Supabase storage)
+  if (includeBroken) {
+    const { data: externalUrls, error: err2 } = await supabase
+      .from("events")
+      .select("id, title, event_url, cover_image_url")
+      .not("cover_image_url", "is", null)
+      .neq("cover_image_url", "")
+      .not("cover_image_url", "like", "%supabase%")
+      .not("event_url", "is", null)
+      .neq("event_url", "")
+      .gte("event_start_time", new Date().toISOString());
+
+    if (!err2 && externalUrls) {
+      // Check which external URLs are actually broken
+      for (const event of externalUrls) {
+        try {
+          const res = await fetch(event.cover_image_url, { method: "HEAD", signal: AbortSignal.timeout(5000) });
+          if (!res.ok) {
+            console.log(`  Broken image (${res.status}): ${event.title.substring(0, 40)}...`);
+            results.push({ id: event.id, title: event.title, event_url: event.event_url });
+          }
+        } catch {
+          console.log(`  Broken image (timeout): ${event.title.substring(0, 40)}...`);
+          results.push({ id: event.id, title: event.title, event_url: event.event_url });
+        }
+      }
+    }
+  }
+
+  return results;
 }
 
-export async function backfillImages(): Promise<void> {
-  console.log("Starting enhanced image backfill...\n");
+export async function backfillImages(includeBroken: boolean = false): Promise<void> {
+  console.log(`Starting enhanced image backfill...${includeBroken ? " (including broken URLs)" : ""}\n`);
 
-  const events = await getEventsWithMissingImages();
+  const events = await getEventsWithMissingImages(includeBroken);
   console.log(`Found ${events.length} events with missing images\n`);
 
   let updated = 0;
@@ -338,29 +374,24 @@ export async function backfillImages(): Promise<void> {
         }
 
         // Extract image
-        let imageUrl = extractImageFromHtml(html);
-        let usingFallback = false;
+        const imageUrl = extractImageFromHtml(html);
 
         if (!imageUrl || !isValidImageUrl(imageUrl)) {
-          console.log(`  ⚠️ No valid image found, using Crowdia fallback`);
-          imageUrl = CROWDIA_FALLBACK_IMAGE;
-          usingFallback = true;
-        } else {
-          console.log(`  📷 Found image: ${imageUrl.substring(0, 60)}...`);
+          console.log(`  ⚠️ No valid image found, skipping (better empty than wrong)\n`);
+          skipped++;
+          continue;
         }
+        
+        console.log(`  📷 Found image: ${imageUrl.substring(0, 60)}...`);
 
-        // Upload image to Supabase Storage (skip if using fallback - already in storage)
+        // Upload image to Supabase Storage
         let finalImageUrl = imageUrl;
-        if (!usingFallback) {
-          const uploadResult = await uploadEventImage(event.id, imageUrl);
-          if (uploadResult.success && uploadResult.publicUrl) {
-            console.log(`  ☁️ Uploaded to storage`);
-            finalImageUrl = uploadResult.publicUrl;
-          } else {
-            console.log(`  ⚠️ Storage upload failed, using original URL`);
-          }
+        const uploadResult = await uploadEventImage(event.id, imageUrl);
+        if (uploadResult.success && uploadResult.publicUrl) {
+          console.log(`  ☁️ Uploaded to storage`);
+          finalImageUrl = uploadResult.publicUrl;
         } else {
-          console.log(`  🫒 Using Crowdia fallback image`);
+          console.log(`  ⚠️ Storage upload failed, using original URL`);
         }
 
         // Update the event with both new URL (if changed) and image
@@ -404,4 +435,5 @@ export async function backfillImages(): Promise<void> {
 }
 
 // Run if executed directly
-backfillImages().catch(console.error);
+const includeBroken = process.argv.includes("--fix-broken");
+backfillImages(includeBroken).catch(console.error);

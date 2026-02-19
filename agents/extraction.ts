@@ -301,15 +301,17 @@ export async function runExtractionAgent(
 
     if (options.isInstagramOnly) {
       sources = sources.filter(s => s.type === 'instagram' && s.enabled !== false);
-      // Sort by last_scraped_at (null first, then oldest)
-      sources.sort((a, b) => {
-        if (!a.last_scraped_at && !b.last_scraped_at) return 0;
-        if (!a.last_scraped_at) return -1;
-        if (!b.last_scraped_at) return 1;
-        return new Date(a.last_scraped_at).getTime() - new Date(b.last_scraped_at).getTime();
-      });
       await logger.info(`Filtered to ${sources.length} enabled Instagram sources`);
     }
+
+    // Always sort by last_scraped_at (null/never-scraped first, then oldest)
+    // This ensures new sources get scraped before re-scraping old ones
+    sources.sort((a, b) => {
+      if (!a.last_scraped_at && !b.last_scraped_at) return 0;
+      if (!a.last_scraped_at) return -1;
+      if (!b.last_scraped_at) return 1;
+      return new Date(a.last_scraped_at).getTime() - new Date(b.last_scraped_at).getTime();
+    });
 
     if (options.maxSourcesPerRun && sources.length > options.maxSourcesPerRun) {
       sources = sources.slice(0, options.maxSourcesPerRun);
@@ -596,6 +598,30 @@ export async function runExtractionAgent(
             console.log(`  → ${event.title.substring(0, 50)}...`);
             console.log(`    URL: ${event.detail_url || "(none)"} ${hasValidUrl ? "✓" : "⚠ listing page"}`);
             console.log(`    Image: ${hasImage ? event.image_url?.substring(0, 50) + "..." : "(none)"}`);
+          }
+
+          // Pre-upload website images to Supabase storage (similar to Instagram)
+          // This prevents external URLs from breaking (403/404) before event creation
+          for (const event of events) {
+            if (event.image_url && event.image_url.startsWith("http")) {
+              try {
+                // Use a temporary event ID for storage (we'll update the real event later)
+                const tempEventId = `temp-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+                const uploadResult = await uploadEventImage(tempEventId, event.image_url);
+                
+                if (uploadResult.success && uploadResult.publicUrl) {
+                  // Replace external URL with storage URL
+                  const oldUrl = event.image_url;
+                  event.image_url = uploadResult.publicUrl;
+                  await logger.debug(`Pre-uploaded image for "${event.title.substring(0, 30)}...": ${oldUrl.substring(0, 40)}... → storage`);
+                } else {
+                  await logger.debug(`Failed to pre-upload image for "${event.title.substring(0, 30)}...": ${uploadResult.error || 'unknown error'}`);
+                }
+              } catch (uploadError) {
+                // Non-critical - continue with external URL
+                await logger.debug(`Image pre-upload error for "${event.title.substring(0, 30)}...": ${uploadError instanceof Error ? uploadError.message : String(uploadError)}`);
+              }
+            }
           }
 
           // Add to collection (with in-run deduplication using fuzzy matching)
